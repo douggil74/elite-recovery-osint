@@ -682,9 +682,176 @@ async def root():
             '/api/username/full': 'Combined username search',
             '/api/phone': 'Phone intelligence',
             '/api/sweep': 'Full OSINT sweep',
+            '/api/ai/chat': 'AI chat completion (OpenAI proxy)',
+            '/api/ai/analyze': 'AI image/document analysis',
+            '/api/ai/brief': 'Generate recovery brief',
             '/health': 'Health check'
         }
     }
+
+
+# ============================================================================
+# AI PROXY (OpenAI) - Keeps API key server-side
+# ============================================================================
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+class ChatRequest(BaseModel):
+    messages: List[Dict[str, str]]
+    model: str = "gpt-4o-mini"
+    max_tokens: int = 2000
+
+
+class AnalyzeRequest(BaseModel):
+    image_base64: Optional[str] = None
+    image_url: Optional[str] = None
+    prompt: str
+    model: str = "gpt-4o"
+
+
+class BriefRequest(BaseModel):
+    subject_name: str
+    known_addresses: List[str] = []
+    known_associates: List[str] = []
+    vehicle_info: Optional[str] = None
+    social_profiles: List[Dict[str, str]] = []
+    notes: Optional[str] = None
+
+
+@app.post("/api/ai/chat")
+async def ai_chat(request: ChatRequest):
+    """OpenAI chat completion proxy - keeps API key server-side"""
+    if not OPENAI_API_KEY:
+        raise HTTPException(status_code=500, detail="OpenAI API key not configured on server")
+
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": request.model,
+                "messages": request.messages,
+                "max_tokens": request.max_tokens
+            },
+            timeout=60.0
+        )
+
+        if response.status_code != 200:
+            raise HTTPException(status_code=response.status_code, detail=response.text)
+
+        return response.json()
+
+
+@app.post("/api/ai/analyze")
+async def ai_analyze(request: AnalyzeRequest):
+    """Analyze image or document with GPT-4 Vision"""
+    if not OPENAI_API_KEY:
+        raise HTTPException(status_code=500, detail="OpenAI API key not configured on server")
+
+    # Build message content
+    content = [{"type": "text", "text": request.prompt}]
+
+    if request.image_base64:
+        content.append({
+            "type": "image_url",
+            "image_url": {"url": f"data:image/jpeg;base64,{request.image_base64}"}
+        })
+    elif request.image_url:
+        content.append({
+            "type": "image_url",
+            "image_url": {"url": request.image_url}
+        })
+
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": request.model,
+                "messages": [{"role": "user", "content": content}],
+                "max_tokens": 4000
+            },
+            timeout=120.0
+        )
+
+        if response.status_code != 200:
+            raise HTTPException(status_code=response.status_code, detail=response.text)
+
+        return response.json()
+
+
+@app.post("/api/ai/brief")
+async def generate_brief(request: BriefRequest):
+    """Generate AI-powered recovery brief"""
+    if not OPENAI_API_KEY:
+        raise HTTPException(status_code=500, detail="OpenAI API key not configured on server")
+
+    # Build context for the AI
+    context = f"""Generate a professional fugitive recovery brief for field agents.
+
+SUBJECT: {request.subject_name}
+
+KNOWN ADDRESSES:
+{chr(10).join(f'- {addr}' for addr in request.known_addresses) if request.known_addresses else 'None on file'}
+
+KNOWN ASSOCIATES:
+{chr(10).join(f'- {assoc}' for assoc in request.known_associates) if request.known_associates else 'None on file'}
+
+VEHICLE INFORMATION:
+{request.vehicle_info or 'None on file'}
+
+SOCIAL MEDIA PROFILES:
+{chr(10).join(f'- {p.get("platform", "Unknown")}: {p.get("url", "")}' for p in request.social_profiles) if request.social_profiles else 'None found'}
+
+ADDITIONAL NOTES:
+{request.notes or 'None'}
+
+Please provide:
+1. EXECUTIVE SUMMARY (2-3 sentences)
+2. RECOMMENDED APPROACH (tactical advice for field agents)
+3. LOCATIONS TO CHECK (prioritized list based on available info)
+4. TIMING RECOMMENDATIONS (best times to attempt contact/apprehension)
+5. SAFETY CONSIDERATIONS (risk assessment)
+6. BACKUP PLANS (alternative approaches if primary fails)
+
+Be concise, professional, and actionable. This is for licensed bail enforcement agents."""
+
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "gpt-4o-mini",
+                "messages": [
+                    {"role": "system", "content": "You are an expert fugitive recovery consultant helping licensed bail enforcement agents. Provide tactical, professional advice."},
+                    {"role": "user", "content": context}
+                ],
+                "max_tokens": 2000
+            },
+            timeout=60.0
+        )
+
+        if response.status_code != 200:
+            raise HTTPException(status_code=response.status_code, detail=response.text)
+
+        result = response.json()
+        brief_text = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+
+        return {
+            "subject": request.subject_name,
+            "generated_at": datetime.now().isoformat(),
+            "brief": brief_text,
+            "model": "gpt-4o-mini"
+        }
 
 
 if __name__ == "__main__":
