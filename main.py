@@ -949,13 +949,15 @@ async def root():
     """Root endpoint with API info"""
     return {
         'name': 'Elite Recovery OSINT API',
-        'version': '1.0.0',
+        'version': '1.1.0',
         'endpoints': {
             '/api/sherlock': 'Username search (400+ sites)',
             '/api/maigret': 'Comprehensive username search',
             '/api/holehe': 'Email account discovery',
             '/api/socialscan': 'Quick username/email check',
             '/api/username/full': 'Combined username search',
+            '/api/multi-username': 'Search multiple username variations',
+            '/api/investigate': 'INTELLIGENT person investigation (smart flow)',
             '/api/phone': 'Phone intelligence',
             '/api/sweep': 'Full OSINT sweep',
             '/api/ai/chat': 'AI chat completion (OpenAI proxy)',
