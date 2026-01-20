@@ -548,6 +548,112 @@ async def phone_search(request: PhoneSearchRequest):
 
 
 # ============================================================================
+# MULTI-USERNAME SEARCH (searches variations)
+# ============================================================================
+
+class MultiUsernameRequest(BaseModel):
+    name: str
+    usernames: Optional[List[str]] = None  # If not provided, will generate from name
+    max_usernames: int = 5
+    timeout: int = 30
+
+
+def generate_username_variations(full_name: str) -> List[str]:
+    """Generate common username variations from a name"""
+    parts = full_name.lower().split()
+    if len(parts) < 2:
+        return [full_name.lower().replace(" ", "")]
+
+    first = parts[0]
+    last = parts[-1]
+    middle = parts[1] if len(parts) > 2 else ""
+    first_initial = first[0] if first else ""
+    last_initial = last[0] if last else ""
+
+    variations = [
+        f"{first}{last}",           # amandadriskell
+        f"{first}_{last}",          # amanda_driskell
+        f"{first}.{last}",          # amanda.driskell
+        f"{first}-{last}",          # amanda-driskell
+        f"{last}{first}",           # driskellamanda
+        f"{first_initial}{last}",   # adriskell
+        f"{first}{last_initial}",   # amandad
+        f"{first}_{last_initial}",  # amanda_d
+        f"{last}_{first}",          # driskell_amanda
+        f"{first}{last}1",          # amandadriskell1
+        f"{first}{last}123",        # amandadriskell123
+        f"real{first}{last}",       # realamandadriskell
+        f"the{first}{last}",        # theamandadriskell
+        f"{first}official",         # amandaofficial
+    ]
+
+    if middle:
+        variations.extend([
+            f"{first}{middle[0]}{last}",   # amandajdriskell
+            f"{first}_{middle[0]}_{last}", # amanda_j_driskell
+        ])
+
+    # Remove duplicates and filter
+    return list(dict.fromkeys([v for v in variations if len(v) > 2]))
+
+
+@app.post("/api/multi-username")
+async def multi_username_search(request: MultiUsernameRequest):
+    """Search multiple username variations using Sherlock"""
+    start_time = datetime.now()
+
+    # Generate usernames if not provided
+    usernames = request.usernames
+    if not usernames:
+        usernames = generate_username_variations(request.name)
+
+    # Limit to max_usernames
+    usernames = usernames[:request.max_usernames]
+
+    all_found = {}  # Dedupe by URL
+    all_errors = []
+    searched_usernames = []
+
+    loop = asyncio.get_event_loop()
+
+    # Search each username
+    for username in usernames:
+        searched_usernames.append(username)
+        try:
+            result = await loop.run_in_executor(
+                executor,
+                run_sherlock,
+                username,
+                request.timeout
+            )
+
+            for item in result.get('found', []):
+                url = item.get('url', '')
+                if url and url not in all_found:
+                    all_found[url] = {
+                        **item,
+                        'searched_username': username
+                    }
+
+            all_errors.extend([f"{username}: {e}" for e in result.get('errors', [])])
+
+        except Exception as e:
+            all_errors.append(f"{username}: {str(e)}")
+
+    execution_time = (datetime.now() - start_time).total_seconds()
+
+    return {
+        'name': request.name,
+        'searched_at': datetime.now().isoformat(),
+        'usernames_searched': searched_usernames,
+        'total_profiles_found': len(all_found),
+        'profiles': list(all_found.values()),
+        'errors': all_errors[:20],  # Limit errors
+        'execution_time': execution_time
+    }
+
+
+# ============================================================================
 # FULL OSINT SWEEP
 # ============================================================================
 
@@ -635,6 +741,176 @@ async def full_osint_sweep(request: FullSweepRequest):
         'summary': ' | '.join(summary_parts) if summary_parts else 'No results found',
         'total_profiles_found': total_profiles,
         'execution_time': execution_time
+    }
+
+
+# ============================================================================
+# INTELLIGENT PERSON INVESTIGATION (Smart Flow)
+# ============================================================================
+
+class InvestigatePersonRequest(BaseModel):
+    name: str
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    location: Optional[str] = None  # State/city to narrow down
+
+
+class InvestigatePersonResult(BaseModel):
+    name: str
+    searched_at: str
+    flow_steps: List[Dict[str, Any]]
+    discovered_emails: List[str]
+    discovered_usernames: List[str]
+    confirmed_profiles: List[Dict[str, str]]
+    people_search_links: List[Dict[str, str]]
+    summary: str
+    execution_time: float
+
+
+@app.post("/api/investigate", response_model=InvestigatePersonResult)
+async def investigate_person(request: InvestigatePersonRequest):
+    """
+    Intelligent person investigation flow:
+    1. Generate people search links
+    2. If email provided, check registrations with holehe
+    3. Try username variations with Sherlock
+    4. Compile all findings
+    """
+    start_time = datetime.now()
+    flow_steps = []
+    discovered_emails = []
+    discovered_usernames = []
+    confirmed_profiles = []
+
+    # Parse name
+    name_parts = request.name.lower().split()
+    first = name_parts[0] if name_parts else ""
+    last = name_parts[-1] if len(name_parts) > 1 else name_parts[0] if name_parts else ""
+
+    # Step 1: Generate people search links
+    flow_steps.append({
+        "step": 1,
+        "action": "Generate people search links",
+        "status": "running"
+    })
+
+    people_search_links = [
+        {"name": "TruePeopleSearch", "url": f"https://www.truepeoplesearch.com/results?name={request.name.replace(' ', '%20')}", "type": "free"},
+        {"name": "FastPeopleSearch", "url": f"https://www.fastpeoplesearch.com/name/{request.name.replace(' ', '-')}", "type": "free"},
+        {"name": "Whitepages", "url": f"https://www.whitepages.com/name/{first}-{last}", "type": "free"},
+        {"name": "Spokeo", "url": f"https://www.spokeo.com/{first}-{last}", "type": "paid"},
+        {"name": "BeenVerified", "url": f"https://www.beenverified.com/people/{first}-{last}/", "type": "paid"},
+        {"name": "Intelius", "url": f"https://www.intelius.com/people-search/{first}-{last}/", "type": "paid"},
+        {"name": "ThatsThem", "url": f"https://thatsthem.com/name/{first}-{last}", "type": "free"},
+        {"name": "USSearch", "url": f"https://www.ussearch.com/search/results/people?firstName={first}&lastName={last}", "type": "paid"},
+        {"name": "Facebook", "url": f"https://www.facebook.com/search/people?q={request.name.replace(' ', '%20')}", "type": "social"},
+        {"name": "LinkedIn", "url": f"https://www.linkedin.com/search/results/people/?keywords={request.name.replace(' ', '%20')}", "type": "social"},
+        {"name": "Instagram", "url": f"https://www.instagram.com/{first}{last}/", "type": "social"},
+        {"name": "Twitter/X", "url": f"https://twitter.com/search?q={request.name.replace(' ', '%20')}&f=user", "type": "social"},
+    ]
+
+    if request.location:
+        loc = request.location.replace(' ', '%20')
+        people_search_links.extend([
+            {"name": "TruePeopleSearch (Location)", "url": f"https://www.truepeoplesearch.com/results?name={request.name.replace(' ', '%20')}&citystatezip={loc}", "type": "free"},
+            {"name": "Whitepages (Location)", "url": f"https://www.whitepages.com/name/{first}-{last}/{loc}", "type": "free"},
+        ])
+
+    flow_steps[-1]["status"] = "complete"
+    flow_steps[-1]["result"] = f"Generated {len(people_search_links)} search links"
+
+    # Step 2: If email provided, check with holehe
+    if request.email:
+        flow_steps.append({
+            "step": 2,
+            "action": f"Check email registration: {request.email}",
+            "status": "running"
+        })
+
+        discovered_emails.append(request.email)
+
+        try:
+            loop = asyncio.get_event_loop()
+            email_result = await loop.run_in_executor(
+                executor, run_holehe, request.email, 60
+            )
+
+            registered_services = email_result.get('registered_on', [])
+            for service in registered_services:
+                confirmed_profiles.append({
+                    "platform": service.get('service', 'Unknown'),
+                    "source": "holehe (email)",
+                    "email": request.email,
+                    "url": f"https://{service.get('service', '').lower().replace(' ', '')}.com"
+                })
+
+            flow_steps[-1]["status"] = "complete"
+            flow_steps[-1]["result"] = f"Found {len(registered_services)} services"
+
+        except Exception as e:
+            flow_steps[-1]["status"] = "error"
+            flow_steps[-1]["result"] = str(e)
+
+    # Step 3: Try common username variations with Sherlock
+    flow_steps.append({
+        "step": 3,
+        "action": "Search username variations with Sherlock",
+        "status": "running"
+    })
+
+    # Generate smart username variations
+    username_variations = generate_username_variations(request.name)[:5]  # Top 5
+    discovered_usernames.extend(username_variations)
+
+    loop = asyncio.get_event_loop()
+    all_sherlock_found = {}
+
+    for username in username_variations:
+        try:
+            result = await loop.run_in_executor(
+                executor, run_sherlock, username, 30
+            )
+
+            for profile in result.get('found', []):
+                url = profile.get('url', '')
+                if url and url not in all_sherlock_found:
+                    all_sherlock_found[url] = {
+                        "platform": profile.get('platform', 'Unknown'),
+                        "url": url,
+                        "username": username,
+                        "source": "sherlock"
+                    }
+                    confirmed_profiles.append(all_sherlock_found[url])
+
+        except Exception as e:
+            pass  # Continue with other usernames
+
+    flow_steps[-1]["status"] = "complete"
+    flow_steps[-1]["result"] = f"Searched {len(username_variations)} usernames, found {len(all_sherlock_found)} profiles"
+
+    # Build summary
+    summary_parts = [
+        f"Investigated: {request.name}",
+        f"Search links: {len(people_search_links)}",
+        f"Usernames tried: {', '.join(username_variations[:3])}...",
+        f"Confirmed profiles: {len(confirmed_profiles)}"
+    ]
+
+    if request.email:
+        summary_parts.insert(1, f"Email checked: {request.email}")
+
+    execution_time = (datetime.now() - start_time).total_seconds()
+
+    return {
+        "name": request.name,
+        "searched_at": datetime.now().isoformat(),
+        "flow_steps": flow_steps,
+        "discovered_emails": discovered_emails,
+        "discovered_usernames": discovered_usernames,
+        "confirmed_profiles": confirmed_profiles,
+        "people_search_links": people_search_links,
+        "summary": " | ".join(summary_parts),
+        "execution_time": execution_time
     }
 
 
