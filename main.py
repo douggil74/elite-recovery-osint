@@ -1132,6 +1132,90 @@ Be concise, professional, and actionable. This is for licensed bail enforcement 
         }
 
 
+# ============================================================================
+# TEMPORARY IMAGE HOSTING (for reverse image search)
+# ============================================================================
+
+import uuid
+import base64
+from fastapi.responses import Response
+
+# In-memory image store with expiration (images expire after 10 minutes)
+temp_images: Dict[str, Dict[str, Any]] = {}
+
+class ImageUploadRequest(BaseModel):
+    image_base64: str
+
+
+@app.post("/api/image/upload")
+async def upload_temp_image(request: ImageUploadRequest):
+    """
+    Upload image temporarily for reverse image search.
+    Returns a public URL that expires after 10 minutes.
+    """
+    # Clean expired images
+    current_time = datetime.now()
+    expired = [k for k, v in temp_images.items()
+               if (current_time - v['uploaded_at']).seconds > 600]
+    for k in expired:
+        del temp_images[k]
+
+    # Generate unique ID
+    image_id = str(uuid.uuid4())[:8]
+
+    # Store image
+    temp_images[image_id] = {
+        'data': request.image_base64,
+        'uploaded_at': current_time
+    }
+
+    # Return public URL
+    base_url = os.getenv('RENDER_EXTERNAL_URL', 'https://elite-recovery-osint.onrender.com')
+    image_url = f"{base_url}/api/image/{image_id}"
+
+    return {
+        'image_id': image_id,
+        'url': image_url,
+        'expires_in': 600,
+        'search_urls': {
+            'google_lens': f"https://lens.google.com/uploadbyurl?url={image_url}",
+            'yandex': f"https://yandex.com/images/search?rpt=imageview&url={image_url}",
+            'bing': f"https://www.bing.com/images/search?view=detailv2&iss=sbi&form=SBIVSP&sbisrc=UrlPaste&q=imgurl:{image_url}",
+            'tineye': f"https://tineye.com/search?url={image_url}",
+        }
+    }
+
+
+@app.get("/api/image/{image_id}")
+async def get_temp_image(image_id: str):
+    """Serve temporarily hosted image"""
+    if image_id not in temp_images:
+        raise HTTPException(status_code=404, detail="Image not found or expired")
+
+    image_data = temp_images[image_id]['data']
+
+    # Remove data URL prefix if present
+    if 'base64,' in image_data:
+        image_data = image_data.split('base64,')[1]
+
+    # Decode base64
+    try:
+        image_bytes = base64.b64decode(image_data)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid image data")
+
+    # Determine content type (assume JPEG for now)
+    content_type = "image/jpeg"
+    if image_bytes[:8] == b'\x89PNG\r\n\x1a\n':
+        content_type = "image/png"
+    elif image_bytes[:4] == b'GIF8':
+        content_type = "image/gif"
+    elif image_bytes[:4] == b'RIFF' and image_bytes[8:12] == b'WEBP':
+        content_type = "image/webp"
+
+    return Response(content=image_bytes, media_type=content_type)
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
