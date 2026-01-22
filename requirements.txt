@@ -35,3 +35,36 @@ geopy
 
 # Search Tools
 duckduckgo-search
+
+# =============================================
+# OSINT TOOLS - Username/Social
+# =============================================
+sherlock-project>=0.14.0
+maigret
+socialscan
+
+# =============================================
+# OSINT TOOLS - Email
+# =============================================
+holehe
+h8mail
+theHarvester
+
+# =============================================
+# OSINT TOOLS - Phone
+# =============================================
+# phoneinfoga requires Go binary - use API fallback
+ignorant
+
+# =============================================
+# OSINT TOOLS - Instagram
+# =============================================
+instaloader
+toutatis
+
+# =============================================
+# OSINT TOOLS - Advanced
+# =============================================
+# social-analyzer - heavy dependency, use API
+# blackbird - use maigret as alternative
+# ghunt - requires complex setup, use API fallback

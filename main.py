@@ -31,7 +31,7 @@ import httpx
 app = FastAPI(
     title="Elite Recovery OSINT API",
     description="Advanced OSINT intelligence gathering for fugitive recovery",
-    version="1.0.0"
+    version="1.5.0"
 )
 
 # CORS - allow all origins for the recovery app
