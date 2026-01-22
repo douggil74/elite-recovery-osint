@@ -3,27 +3,21 @@ fastapi>=0.109.0
 uvicorn[standard]>=0.27.0
 python-multipart>=0.0.6
 pydantic>=2.5.0
-pydantic[email]
 
 # HTTP Clients
 aiohttp>=3.9.0
 httpx>=0.26.0
 requests>=2.31.0
 
-# OSINT Tools - Core (available on PyPI)
-sherlock-project
-maigret
-holehe
-socialscan
-social-analyzer
-h8mail
+# Data Processing
+beautifulsoup4>=4.12.2
+lxml>=4.9.3
 
-# Instagram Tools
-instaloader
-toutatis
+# Async Support
+aiofiles>=23.2.1
 
-# Phone Tools
-ignorant
+# Environment
+python-dotenv>=1.0.0
 
 # Web/Domain Tools
 waybackpy
@@ -37,22 +31,6 @@ python-docx
 
 # Geolocation Tools
 geopy
-ip2geotools
 
 # Search Tools
 duckduckgo-search
-googlesearch-python
-
-# Data Processing
-beautifulsoup4>=4.12.2
-lxml>=4.9.3
-
-# Async Support
-aiofiles>=23.2.1
-
-# Environment
-python-dotenv>=1.0.0
-
-# Note: theHarvester is installed from GitHub via Dockerfile
-# git+https://github.com/laramies/theHarvester.git
-# The PyPI version (0.0.1) is abandoned - use Docker/Render for full deployment
