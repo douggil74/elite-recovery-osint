@@ -2937,6 +2937,299 @@ async def ip_lookup(request: IPLookupRequest):
 
 
 # ============================================================================
+# JAIL ROSTER SCRAPER - Extract inmate data from jail booking pages
+# ============================================================================
+
+class JailRosterRequest(BaseModel):
+    url: str
+
+
+class JailRosterResult(BaseModel):
+    url: str
+    scraped_at: str
+    inmate: Dict[str, Any]
+    charges: List[Dict[str, Any]]
+    bonds: List[Dict[str, Any]]
+    photo_url: Optional[str]
+    errors: List[str]
+    execution_time: float
+
+
+async def scrape_jail_roster(url: str) -> Dict[str, Any]:
+    """
+    Scrape jail roster/booking page to extract inmate data.
+    Supports common jail roster formats (Revize, JailTracker, etc.)
+    """
+    start_time = datetime.now()
+    inmate = {}
+    charges = []
+    bonds = []
+    photo_url = None
+    errors = []
+
+    # Common headers to avoid 403 errors
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+    }
+
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
+            response = await client.get(url, headers=headers)
+
+            if response.status_code != 200:
+                errors.append(f"Failed to fetch page: HTTP {response.status_code}")
+                return {
+                    'url': url,
+                    'scraped_at': datetime.now().isoformat(),
+                    'inmate': inmate,
+                    'charges': charges,
+                    'bonds': bonds,
+                    'photo_url': photo_url,
+                    'errors': errors,
+                    'execution_time': (datetime.now() - start_time).total_seconds()
+                }
+
+            html = response.text
+
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(html, 'lxml')
+
+            # Try to find inmate photo
+            # Common patterns for mugshot images
+            img_selectors = [
+                'img.mugshot', 'img.inmate-photo', 'img.booking-photo',
+                'img[alt*="mugshot"]', 'img[alt*="photo"]', 'img[alt*="inmate"]',
+                '.mugshot img', '.inmate-photo img', '.booking-photo img',
+                '#mugshot', '#inmate-photo', '.photo img',
+                'img[src*="mugshot"]', 'img[src*="booking"]', 'img[src*="inmate"]',
+            ]
+
+            for selector in img_selectors:
+                img = soup.select_one(selector)
+                if img and img.get('src'):
+                    src = img['src']
+                    # Make absolute URL if relative
+                    if src.startswith('/'):
+                        from urllib.parse import urljoin
+                        src = urljoin(url, src)
+                    elif not src.startswith('http'):
+                        from urllib.parse import urljoin
+                        src = urljoin(url, src)
+                    photo_url = src
+                    break
+
+            # If no photo found with selectors, try finding any large image
+            if not photo_url:
+                for img in soup.find_all('img'):
+                    src = img.get('src', '')
+                    alt = img.get('alt', '').lower()
+                    if any(x in src.lower() or x in alt for x in ['mug', 'photo', 'booking', 'inmate', 'image']):
+                        if src.startswith('/'):
+                            from urllib.parse import urljoin
+                            src = urljoin(url, src)
+                        elif not src.startswith('http'):
+                            from urllib.parse import urljoin
+                            src = urljoin(url, src)
+                        photo_url = src
+                        break
+
+            # Extract inmate data - look for common patterns
+            # Pattern 1: Table rows with label/value
+            for row in soup.find_all('tr'):
+                cells = row.find_all(['td', 'th'])
+                if len(cells) >= 2:
+                    label = cells[0].get_text(strip=True).lower().replace(':', '')
+                    value = cells[1].get_text(strip=True)
+
+                    if any(x in label for x in ['name', 'inmate name', 'defendant']):
+                        inmate['name'] = value
+                    elif any(x in label for x in ['booking', 'book #', 'booking #', 'booking number']):
+                        inmate['booking_number'] = value
+                    elif any(x in label for x in ['dob', 'date of birth', 'birth date', 'birthdate']):
+                        inmate['dob'] = value
+                    elif label in ['age']:
+                        inmate['age'] = value
+                    elif any(x in label for x in ['race', 'ethnicity']):
+                        inmate['race'] = value
+                    elif label in ['sex', 'gender']:
+                        inmate['sex'] = value
+                    elif label in ['height', 'ht']:
+                        inmate['height'] = value
+                    elif label in ['weight', 'wt']:
+                        inmate['weight'] = value
+                    elif any(x in label for x in ['hair', 'hair color']):
+                        inmate['hair_color'] = value
+                    elif any(x in label for x in ['eye', 'eye color', 'eyes']):
+                        inmate['eye_color'] = value
+                    elif any(x in label for x in ['address', 'residence', 'home address']):
+                        inmate['address'] = value
+                    elif any(x in label for x in ['arrest date', 'booking date', 'book date']):
+                        inmate['booking_date'] = value
+                    elif any(x in label for x in ['release', 'release date']):
+                        inmate['release_date'] = value
+                    elif any(x in label for x in ['facility', 'location', 'housing']):
+                        inmate['facility'] = value
+
+            # Pattern 2: Definition lists (dl/dt/dd)
+            for dl in soup.find_all('dl'):
+                dts = dl.find_all('dt')
+                dds = dl.find_all('dd')
+                for dt, dd in zip(dts, dds):
+                    label = dt.get_text(strip=True).lower().replace(':', '')
+                    value = dd.get_text(strip=True)
+
+                    if any(x in label for x in ['name', 'inmate']):
+                        inmate['name'] = value
+                    elif 'booking' in label:
+                        inmate['booking_number'] = value
+                    elif 'dob' in label or 'birth' in label:
+                        inmate['dob'] = value
+                    elif label == 'age':
+                        inmate['age'] = value
+                    elif 'race' in label:
+                        inmate['race'] = value
+                    elif label in ['sex', 'gender']:
+                        inmate['sex'] = value
+
+            # Pattern 3: Divs with specific classes (common in modern jail sites)
+            info_divs = soup.find_all(['div', 'span', 'p'], class_=lambda x: x and any(
+                term in str(x).lower() for term in ['inmate', 'booking', 'detail', 'info', 'field']
+            ))
+
+            for div in info_divs:
+                text = div.get_text(strip=True)
+                # Look for "Label: Value" patterns
+                if ':' in text:
+                    parts = text.split(':', 1)
+                    if len(parts) == 2:
+                        label = parts[0].lower().strip()
+                        value = parts[1].strip()
+
+                        if 'name' in label and 'name' not in inmate:
+                            inmate['name'] = value
+                        elif 'booking' in label and 'booking_number' not in inmate:
+                            inmate['booking_number'] = value
+
+            # Extract charges - look for charge tables or lists
+            charge_tables = soup.find_all('table', class_=lambda x: x and 'charge' in str(x).lower())
+            if not charge_tables:
+                # Try finding tables that might contain charges
+                for table in soup.find_all('table'):
+                    headers = [th.get_text(strip=True).lower() for th in table.find_all('th')]
+                    if any('charge' in h or 'offense' in h for h in headers):
+                        charge_tables.append(table)
+
+            for table in charge_tables:
+                rows = table.find_all('tr')
+                headers = []
+                for row in rows:
+                    ths = row.find_all('th')
+                    if ths:
+                        headers = [th.get_text(strip=True).lower() for th in ths]
+                    else:
+                        cells = row.find_all('td')
+                        if cells and headers:
+                            charge = {}
+                            for i, cell in enumerate(cells):
+                                if i < len(headers):
+                                    charge[headers[i]] = cell.get_text(strip=True)
+                            if charge:
+                                charges.append(charge)
+                        elif cells and len(cells) >= 2:
+                            # No headers, assume first cell is charge description
+                            charges.append({
+                                'charge': cells[0].get_text(strip=True),
+                                'details': cells[1].get_text(strip=True) if len(cells) > 1 else ''
+                            })
+
+            # Extract bonds
+            bond_tables = soup.find_all('table', class_=lambda x: x and 'bond' in str(x).lower())
+            if not bond_tables:
+                for table in soup.find_all('table'):
+                    headers = [th.get_text(strip=True).lower() for th in table.find_all('th')]
+                    if any('bond' in h or 'bail' in h for h in headers):
+                        bond_tables.append(table)
+
+            for table in bond_tables:
+                rows = table.find_all('tr')
+                for row in rows:
+                    cells = row.find_all('td')
+                    if cells:
+                        bond_text = ' '.join(cell.get_text(strip=True) for cell in cells)
+                        # Look for dollar amounts
+                        import re
+                        amounts = re.findall(r'\$[\d,]+(?:\.\d{2})?', bond_text)
+                        if amounts:
+                            bonds.append({
+                                'description': bond_text,
+                                'amount': amounts[0] if amounts else None
+                            })
+
+            # If we still don't have a name, try the page title or h1
+            if 'name' not in inmate:
+                # Try page title
+                title = soup.find('title')
+                if title:
+                    title_text = title.get_text(strip=True)
+                    # Common patterns: "John Doe - Booking Details" or "Inmate: John Doe"
+                    if '-' in title_text:
+                        inmate['name'] = title_text.split('-')[0].strip()
+                    elif ':' in title_text:
+                        inmate['name'] = title_text.split(':')[-1].strip()
+
+                # Try h1
+                if 'name' not in inmate:
+                    h1 = soup.find('h1')
+                    if h1:
+                        inmate['name'] = h1.get_text(strip=True)
+
+            # Clean up name if we got one
+            if 'name' in inmate:
+                name = inmate['name']
+                # Remove common prefixes
+                for prefix in ['inmate:', 'defendant:', 'name:', 'booking for']:
+                    if name.lower().startswith(prefix):
+                        name = name[len(prefix):].strip()
+                inmate['name'] = name
+
+    except Exception as e:
+        errors.append(f"Scraping error: {str(e)}")
+
+    execution_time = (datetime.now() - start_time).total_seconds()
+
+    return {
+        'url': url,
+        'scraped_at': datetime.now().isoformat(),
+        'inmate': inmate,
+        'charges': charges,
+        'bonds': bonds,
+        'photo_url': photo_url,
+        'errors': errors,
+        'execution_time': execution_time
+    }
+
+
+@app.post("/api/jail-roster", response_model=JailRosterResult)
+async def jail_roster_scrape(request: JailRosterRequest):
+    """
+    Scrape jail roster/booking page to extract inmate data.
+    Supports various jail systems (Revize, JailTracker, etc.)
+
+    Extracts:
+    - Inmate info (name, DOB, age, race, sex, height, weight, etc.)
+    - Charges
+    - Bond amounts
+    - Mugshot photo URL
+    """
+    return await scrape_jail_roster(request.url)
+
+
+# ============================================================================
 # HEALTH CHECK
 # ============================================================================
 
