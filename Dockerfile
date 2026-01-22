@@ -6,17 +6,12 @@ FROM python:3.11-slim
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies including Go for phoneinfoga
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
     git \
     curl \
     wget \
-    golang-go \
     && rm -rf /var/lib/apt/lists/*
-
-# Set Go environment
-ENV GOPATH=/root/go
-ENV PATH=$PATH:/root/go/bin:/usr/local/go/bin
 
 # Copy requirements first for caching
 COPY requirements.txt .
@@ -24,53 +19,56 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install OSINT tools
+# Install core OSINT tools (username search)
 RUN pip install --no-cache-dir \
-    # Username search
     sherlock-project \
     maigret \
     socialscan \
-    social-analyzer \
-    blackbird \
-    # Email tools
+    social-analyzer
+
+# Install email tools
+RUN pip install --no-cache-dir \
     holehe \
-    h8mail \
-    ghunt \
-    theHarvester \
-    # Instagram
+    h8mail
+
+# Install theHarvester from GitHub (PyPI version is abandoned at 0.0.1)
+RUN pip install --no-cache-dir git+https://github.com/laramies/theHarvester.git
+
+# Install Instagram tools
+RUN pip install --no-cache-dir \
     instaloader \
-    toutatis \
-    # Phone
-    ignorant \
-    # Web/domain tools
-    photon-xss \
+    toutatis
+
+# Install phone tools
+RUN pip install --no-cache-dir \
+    ignorant
+
+# Install web/domain tools
+RUN pip install --no-cache-dir \
     waybackpy \
     dnspython \
-    python-whois \
-    # Document/metadata
+    python-whois
+
+# Install document/metadata tools
+RUN pip install --no-cache-dir \
     ExifRead \
     PyPDF2 \
-    python-docx \
-    # Data enrichment
-    clearbit \
-    # Geolocation
+    python-docx
+
+# Install geolocation tools
+RUN pip install --no-cache-dir \
     geopy \
-    ip2geotools \
-    # Scraping/automation
-    beautifulsoup4 \
-    selenium \
-    playwright \
-    # Additional OSINT
-    twint || true \
-    snscrape \
-    googlesearch-python \
-    duckduckgo-search
+    ip2geotools
 
-# Install Playwright browsers
-RUN playwright install chromium
+# Install search tools
+RUN pip install --no-cache-dir \
+    duckduckgo-search \
+    googlesearch-python
 
-# Install PhoneInfoga (Go-based)
-RUN go install github.com/sundowndev/phoneinfoga/v2/cmd/phoneinfoga@latest
+# Install optional tools (may fail)
+RUN pip install --no-cache-dir blackbird || echo "blackbird install failed, skipping"
+RUN pip install --no-cache-dir snscrape || echo "snscrape install failed, skipping"
+RUN pip install --no-cache-dir ghunt || echo "ghunt install failed, skipping"
 
 # Copy application code
 COPY . .
