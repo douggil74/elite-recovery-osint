@@ -27,11 +27,18 @@ from pydantic import BaseModel, EmailStr
 import aiohttp
 import httpx
 
+# Playwright for browser automation (replaces ScrapingBee)
+try:
+    from playwright.async_api import async_playwright
+    PLAYWRIGHT_AVAILABLE = True
+except ImportError:
+    PLAYWRIGHT_AVAILABLE = False
+
 # Initialize FastAPI
 app = FastAPI(
     title="Elite Recovery OSINT API",
     description="Advanced OSINT intelligence gathering for fugitive recovery",
-    version="3.2.0"
+    version="3.3.0"
 )
 
 # CORS - allow all origins for the recovery app
@@ -3397,21 +3404,7 @@ async def scrape_jail_roster(url: str) -> Dict[str, Any]:
     ]
     random_ua = random.choice(user_agents)
 
-    # Method 1: Try ScrapingBee free tier (100 free credits/month)
-    # Using render=false for speed, premium_proxy for better success
-    try:
-        import os
-        scrapingbee_key = os.environ.get('SCRAPINGBEE_API_KEY')
-        if scrapingbee_key:
-            sb_url = f"https://app.scrapingbee.com/api/v1/?api_key={scrapingbee_key}&url={quote(url, safe='')}&render_js=false"
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.get(sb_url)
-                if response.status_code == 200 and len(response.text) > 500:
-                    html = response.text
-    except Exception as e:
-        errors.append(f"ScrapingBee: {str(e)[:30]}")
-
-    # Method 2: Try multiple free CORS proxies with better headers
+    # Method 1: Try multiple free CORS proxies with better headers
     if not html:
         proxy_configs = [
             # allorigins.win
@@ -4044,7 +4037,7 @@ async def search_la_court_records(name: str, parish: str = None, dob: str = None
     """
     Search Louisiana court records via Tyler Technologies portal.
     Credentials stored in environment variables for security.
-    Uses ScrapingBee for JavaScript rendering when available.
+    Uses Playwright for browser automation when available.
     """
     import os
     import re
@@ -4061,7 +4054,6 @@ async def search_la_court_records(name: str, parish: str = None, dob: str = None
     # Get credentials from environment
     court_user = os.environ.get('LA_COURT_USERNAME')
     court_pass = os.environ.get('LA_COURT_PASSWORD')
-    scrapingbee_key = os.environ.get('SCRAPINGBEE_API_KEY')
 
     if not court_user or not court_pass:
         errors.append("Court records credentials not configured (LA_COURT_USERNAME, LA_COURT_PASSWORD)")
@@ -4090,93 +4082,136 @@ async def search_la_court_records(name: str, parish: str = None, dob: str = None
     active_keywords = ['active', 'open', 'pending', 'arraignment', 'trial']
 
     try:
-        # Use ScrapingBee with JavaScript scenario to properly interact with Tyler's Angular app
-        if scrapingbee_key and court_user and court_pass:
+        # Use Playwright browser automation for Tyler's Angular app
+        if PLAYWRIGHT_AVAILABLE and court_user and court_pass:
             try:
-                # Tyler Technologies Angular app requires proper login and form interaction
-                # Using ScrapingBee's js_scenario to automate the full flow
-                login_url = "https://researchla.tylerhost.net/CourtRecordsSearch/"
-
-                # JavaScript scenario to:
-                # 1. Click login link
-                # 2. Enter credentials
-                # 3. Submit login
-                # 4. Navigate to search
-                # 5. Fill search form
-                # 6. Submit search
-                # 7. Wait for results
-                js_scenario = {
-                    "instructions": [
-                        # Wait for page to load
-                        {"wait": 2000},
-                        # Click the login/sign in link
-                        {"click": "a[href*='Login'], .login-link, a:contains('Sign In'), a:contains('Login')"},
-                        {"wait": 2000},
-                        # Fill in email/username
-                        {"fill": ["input[name='Email'], input[type='email'], #Email", court_user]},
-                        {"wait": 500},
-                        # Fill in password
-                        {"fill": ["input[name='Password'], input[type='password'], #Password", court_pass]},
-                        {"wait": 500},
-                        # Click submit/login button
-                        {"click": "button[type='submit'], input[type='submit'], .btn-primary, button:contains('Log In')"},
-                        {"wait": 3000},
-                        # Navigate to search page
-                        {"click": "a[href*='search'], .search-link, a:contains('Search')"},
-                        {"wait": 2000},
-                        # Fill in last name
-                        {"fill": [f"input[name='LastName'], input[ng-model*='lastName'], #LastName", last_name]},
-                        {"wait": 500},
-                        # Fill in first name
-                        {"fill": [f"input[name='FirstName'], input[ng-model*='firstName'], #FirstName", first_name]},
-                        {"wait": 500},
-                        # Click search button
-                        {"click": "button[type='submit'], .btn-search, button:contains('Search'), input[value='Search']"},
-                        # Wait for results to load
-                        {"wait": 5000},
-                    ]
-                }
-
-                async with httpx.AsyncClient(timeout=60.0) as client:
-                    scrapingbee_url = "https://app.scrapingbee.com/api/v1/"
-
-                    response = await client.get(
-                        scrapingbee_url,
-                        params={
-                            'api_key': scrapingbee_key,
-                            'url': login_url,
-                            'render_js': 'true',
-                            'js_scenario': json.dumps(js_scenario),
-                            'premium_proxy': 'true',
-                            'timeout': 50000,
-                        },
-                        timeout=60.0
+                async with async_playwright() as p:
+                    # Launch headless Chromium
+                    browser = await p.chromium.launch(headless=True)
+                    context = await browser.new_context(
+                        user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
                     )
+                    page = await context.new_page()
 
-                    if response.status_code == 200:
-                        html = response.text
+                    try:
+                        # Navigate to Tyler court search
+                        login_url = "https://researchla.tylerhost.net/CourtRecordsSearch/"
+                        await page.goto(login_url, wait_until='networkidle', timeout=30000)
 
-                        # Parse the rendered HTML for case results
+                        # Wait for Angular app to load
+                        await page.wait_for_timeout(2000)
+
+                        # Try to find and click login link
+                        login_selectors = ['a[href*="Login"]', 'a:has-text("Sign In")', 'a:has-text("Login")', '.login-link']
+                        for selector in login_selectors:
+                            try:
+                                login_link = await page.query_selector(selector)
+                                if login_link:
+                                    await login_link.click()
+                                    await page.wait_for_timeout(2000)
+                                    break
+                            except:
+                                continue
+
+                        # Fill in credentials
+                        email_selectors = ['input[name="Email"]', 'input[type="email"]', '#Email', 'input[id*="mail"]']
+                        for selector in email_selectors:
+                            try:
+                                email_input = await page.query_selector(selector)
+                                if email_input:
+                                    await email_input.fill(court_user)
+                                    break
+                            except:
+                                continue
+
+                        password_selectors = ['input[name="Password"]', 'input[type="password"]', '#Password']
+                        for selector in password_selectors:
+                            try:
+                                pass_input = await page.query_selector(selector)
+                                if pass_input:
+                                    await pass_input.fill(court_pass)
+                                    break
+                            except:
+                                continue
+
+                        # Click login button
+                        submit_selectors = ['button[type="submit"]', 'input[type="submit"]', 'button:has-text("Log In")', 'button:has-text("Sign In")']
+                        for selector in submit_selectors:
+                            try:
+                                submit_btn = await page.query_selector(selector)
+                                if submit_btn:
+                                    await submit_btn.click()
+                                    await page.wait_for_timeout(3000)
+                                    break
+                            except:
+                                continue
+
+                        # Navigate to search (may already be there after login)
+                        search_selectors = ['a[href*="search"]', 'a:has-text("Search")', '.search-link']
+                        for selector in search_selectors:
+                            try:
+                                search_link = await page.query_selector(selector)
+                                if search_link:
+                                    await search_link.click()
+                                    await page.wait_for_timeout(2000)
+                                    break
+                            except:
+                                continue
+
+                        # Fill in search form - try name search
+                        last_name_selectors = ['input[name="LastName"]', 'input[ng-model*="lastName"]', '#LastName', 'input[placeholder*="Last"]']
+                        for selector in last_name_selectors:
+                            try:
+                                ln_input = await page.query_selector(selector)
+                                if ln_input:
+                                    await ln_input.fill(last_name)
+                                    break
+                            except:
+                                continue
+
+                        first_name_selectors = ['input[name="FirstName"]', 'input[ng-model*="firstName"]', '#FirstName', 'input[placeholder*="First"]']
+                        for selector in first_name_selectors:
+                            try:
+                                fn_input = await page.query_selector(selector)
+                                if fn_input:
+                                    await fn_input.fill(first_name)
+                                    break
+                            except:
+                                continue
+
+                        # Click search button
+                        search_btn_selectors = ['button[type="submit"]', 'button:has-text("Search")', 'input[value="Search"]', '.btn-search']
+                        for selector in search_btn_selectors:
+                            try:
+                                search_btn = await page.query_selector(selector)
+                                if search_btn:
+                                    await search_btn.click()
+                                    await page.wait_for_timeout(5000)
+                                    break
+                            except:
+                                continue
+
+                        # Get the rendered HTML
+                        html = await page.content()
+
+                        # Parse results
                         from bs4 import BeautifulSoup
                         import re
                         soup = BeautifulSoup(html, 'html.parser')
 
-                        # Tyler case number patterns: "4820-F-2020", "2024-123456", etc.
+                        # Tyler case number patterns
                         case_num_patterns = [
-                            r'\b(\d{4,6}-[A-Z]-\d{4})\b',  # e.g., 4820-F-2020
-                            r'\b(\d{4}-\d{5,6})\b',        # e.g., 2024-123456
-                            r'\b([A-Z]{2,3}-\d{4}-\d+)\b', # e.g., CR-2020-12345
+                            r'\b(\d{4,6}-[A-Z]-\d{4})\b',
+                            r'\b(\d{4}-\d{5,6})\b',
+                            r'\b([A-Z]{2,3}-\d{4}-\d+)\b',
                         ]
-
-                        # Date patterns for filing dates
                         date_pattern = r'\b(\d{1,2}/\d{1,2}/\d{2,4}|\w+ \d{1,2}, \d{4})\b'
 
-                        # Try multiple Tyler-specific selectors
+                        # Try multiple selectors for case rows
                         row_selectors = [
                             '.case-row', '.search-result', '.case-item',
                             'tr[ng-repeat]', 'tr[data-case]', 'div[ng-repeat]',
-                            '.results-row', '.case-result', '.case-listing',
-                            'tbody tr', '.list-group-item', '.card'
+                            '.results-row', '.case-result', 'tbody tr', '.list-group-item'
                         ]
 
                         case_rows = []
@@ -4186,7 +4221,7 @@ async def search_la_court_records(name: str, parish: str = None, dob: str = None
                                 case_rows = found
                                 break
 
-                        # If no rows found, try finding case numbers anywhere in HTML
+                        # If no rows, try finding case numbers in full text
                         if not case_rows:
                             full_text = soup.get_text()
                             for pattern in case_num_patterns:
@@ -4202,9 +4237,6 @@ async def search_la_court_records(name: str, parish: str = None, dob: str = None
                                         'has_fta': False,
                                         'has_warrant': False
                                     }
-
-                                    # Check surrounding context for FTA/warrant
-                                    # Find the case number position and check nearby text
                                     idx = full_text.lower().find(case_num.lower())
                                     if idx > 0:
                                         context = full_text[max(0, idx-200):idx+200].lower()
@@ -4222,20 +4254,15 @@ async def search_la_court_records(name: str, parish: str = None, dob: str = None
                                             if keyword in context:
                                                 active_count += 1
                                                 break
-
-                                        # Try to find a date in context
                                         date_matches = re.findall(date_pattern, context)
                                         if date_matches:
                                             case_data['filing_date'] = date_matches[0]
-
                                     cases.append(case_data)
 
                         # Process rows if found
                         for row in case_rows:
                             case_text = row.get_text(' ', strip=True)
                             case_text_lower = case_text.lower()
-
-                            # Extract case info
                             case_data = {
                                 'case_number': '',
                                 'case_type': '',
@@ -4246,72 +4273,54 @@ async def search_la_court_records(name: str, parish: str = None, dob: str = None
                                 'has_fta': False,
                                 'has_warrant': False
                             }
-
-                            # Try to find case number with regex
                             for pattern in case_num_patterns:
                                 match = re.search(pattern, case_text)
                                 if match:
                                     case_data['case_number'] = match.group(1)
                                     break
-
-                            # Fall back to element selectors
                             if not case_data['case_number']:
                                 case_num_elem = row.select_one('.case-number, [data-case-number], td:first-child a, a')
                                 if case_num_elem:
                                     case_data['case_number'] = case_num_elem.get_text(strip=True)
-
-                            # Try to find date
                             date_match = re.search(date_pattern, case_text)
                             if date_match:
                                 case_data['filing_date'] = date_match.group(1)
-
-                            # Check for FTA/warrant indicators
                             for keyword in fta_keywords:
                                 if keyword in case_text_lower:
                                     case_data['has_fta'] = True
                                     fta_count += 1
                                     break
-
                             for keyword in warrant_keywords:
                                 if keyword in case_text_lower:
                                     case_data['has_warrant'] = True
                                     warrant_count += 1
                                     break
-
                             for keyword in active_keywords:
                                 if keyword in case_text_lower:
                                     active_count += 1
                                     break
-
                             if case_data['case_number']:
                                 cases.append(case_data)
 
-                        # Store debug info if no cases found
+                        # Debug info if no cases found
                         if not cases:
-                            # Check what state we're in
-                            if 'login' in html.lower() or 'sign in' in html.lower() or 'password' in html.lower():
-                                errors.append("Login failed - still on login page. Check credentials.")
-                            elif 'No results' in html or 'no records' in html.lower() or '0 results' in html.lower() or 'no cases' in html.lower():
-                                errors.append("No court records found for this name in Louisiana")
-                            elif 'search' in html.lower() and ('first' in html.lower() or 'last' in html.lower()):
-                                errors.append("On search page but no results. Search may not have executed.")
+                            if 'login' in html.lower() or 'sign in' in html.lower():
+                                errors.append("Login may have failed - still on login page")
+                            elif 'no results' in html.lower() or 'no records' in html.lower():
+                                errors.append("No court records found for this name")
                             else:
-                                # Show what page title or key content we got
                                 title_elem = soup.find('title')
                                 page_title = title_elem.get_text(strip=True) if title_elem else 'Unknown'
-                                # Get body text sample
-                                body_text = soup.get_text()[:300].replace('\n', ' ').strip()
-                                errors.append(f"Page: {page_title}. Content: {body_text[:150]}...")
+                                errors.append(f"Page: {page_title}")
 
-                    else:
-                        errors.append(f"ScrapingBee returned {response.status_code}")
+                    finally:
+                        await browser.close()
 
             except Exception as e:
-                errors.append(f"ScrapingBee error: {str(e)[:50]}")
+                errors.append(f"Playwright error: {str(e)[:50]}")
 
-        # Fallback to direct API approach if ScrapingBee didn't find cases
+        # Fallback to direct API approach if Playwright didn't find cases
         if not cases and court_user and court_pass:
-            # Clear ScrapingBee parsing errors since we're trying API
             api_errors = []
 
             try:
@@ -4415,7 +4424,7 @@ async def search_la_court_records(name: str, parish: str = None, dob: str = None
                                         }
                                         cases.append(case)
 
-                                # Clear ScrapingBee errors if API succeeded
+                                # Clear Playwright errors if API succeeded
                                 if cases:
                                     errors = []
 
@@ -5073,7 +5082,7 @@ async def calculate_fta_risk(request: FTAScoreRequest):
         "la_search": "completed" if isinstance(la_records, dict) else "failed",
         "prior_bookings_search": "completed" if isinstance(prior_bookings, list) else "failed",
         "la_credentials_set": bool(os.environ.get('LA_COURT_USERNAME')),
-        "scrapingbee_set": bool(os.environ.get('SCRAPINGBEE_API_KEY')),
+        "playwright_available": PLAYWRIGHT_AVAILABLE,
     }
 
     return {
@@ -5145,12 +5154,9 @@ async def calculate_fta_batch(inmates: List[FTAScoreRequest]):
 
 @app.get("/api/debug-tyler")
 async def debug_tyler_search(name: str = "Sara Richard"):
-    """Debug endpoint to see what Tyler's site returns"""
-    import os
-    scrapingbee_key = os.environ.get('SCRAPINGBEE_API_KEY')
-
-    if not scrapingbee_key:
-        return {"error": "SCRAPINGBEE_API_KEY not configured"}
+    """Debug endpoint to see what Tyler's site returns using Playwright"""
+    if not PLAYWRIGHT_AVAILABLE:
+        return {"error": "Playwright not available"}
 
     # Parse name
     parts = name.strip().split()
@@ -5158,24 +5164,21 @@ async def debug_tyler_search(name: str = "Sara Richard"):
     last_name = parts[-1] if len(parts) > 1 else parts[0]
 
     try:
-        # Simple approach: just load the search page with URL params
-        search_url = f"https://researchla.tylerhost.net/CourtRecordsSearch/#background-tab-Court%20Case%20Search"
-
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(
-                "https://app.scrapingbee.com/api/v1/",
-                params={
-                    'api_key': scrapingbee_key,
-                    'url': search_url,
-                    'render_js': 'true',
-                    'wait': 5000,
-                    'premium_proxy': 'true',
-                },
-                timeout=30.0
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            context = await browser.new_context(
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
             )
+            page = await context.new_page()
 
-            if response.status_code == 200:
-                html = response.text
+            try:
+                # Navigate to Tyler court search
+                search_url = "https://researchla.tylerhost.net/CourtRecordsSearch/"
+                await page.goto(search_url, wait_until='networkidle', timeout=30000)
+                await page.wait_for_timeout(3000)
+
+                # Get the rendered HTML
+                html = await page.content()
                 from bs4 import BeautifulSoup
                 soup = BeautifulSoup(html, 'html.parser')
 
@@ -5206,14 +5209,12 @@ async def debug_tyler_search(name: str = "Sara Richard"):
                     "buttons_found": button_info,
                     "links_found": link_info,
                     "body_sample": body_text,
-                    "searched_name": {"first": first_name, "last": last_name}
+                    "searched_name": {"first": first_name, "last": last_name},
+                    "engine": "playwright"
                 }
-            else:
-                return {
-                    "status": "error",
-                    "scrapingbee_status": response.status_code,
-                    "response": response.text[:500]
-                }
+            finally:
+                await browser.close()
+
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
