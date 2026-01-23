@@ -2967,19 +2967,56 @@ async def scrape_jail_roster(url: str) -> Dict[str, Any]:
     photo_url = None
     errors = []
 
-    # Common headers to avoid 403 errors
+    # Enhanced headers to better mimic real browser
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+        'Accept-Language': 'en-US,en;q=0.9',
         'Accept-Encoding': 'gzip, deflate, br',
         'Connection': 'keep-alive',
         'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'Cache-Control': 'max-age=0',
+        'sec-ch-ua': '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': '"macOS"',
     }
+
+    # Extract booking ID from URL for fallback
+    from urllib.parse import urlparse, parse_qs
+    parsed_url = urlparse(url)
+    path_parts = parsed_url.path.strip('/').split('/')
+    booking_id = path_parts[-1] if path_parts else None
+
+    # Try to identify the jail/sheriff from domain
+    domain = parsed_url.netloc
+    jail_name = domain.split('.')[0] if domain else 'Unknown'
 
     try:
         async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
             response = await client.get(url, headers=headers)
+
+            if response.status_code == 403:
+                # Provide fallback with manual entry option
+                errors.append(f"Site blocked automated access (HTTP 403). Please manually view the page and enter data below.")
+                inmate['_manual_entry_required'] = True
+                inmate['_source_url'] = url
+                inmate['_booking_id'] = booking_id
+                inmate['_jail_name'] = jail_name
+                return {
+                    'url': url,
+                    'scraped_at': datetime.now().isoformat(),
+                    'inmate': inmate,
+                    'charges': charges,
+                    'bonds': bonds,
+                    'photo_url': photo_url,
+                    'errors': errors,
+                    'manual_entry_hint': f"Open {url} in your browser to view inmate details, then enter manually.",
+                    'execution_time': (datetime.now() - start_time).total_seconds()
+                }
 
             if response.status_code != 200:
                 errors.append(f"Failed to fetch page: HTTP {response.status_code}")
