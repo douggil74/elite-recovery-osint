@@ -31,7 +31,7 @@ import httpx
 app = FastAPI(
     title="Elite Recovery OSINT API",
     description="Advanced OSINT intelligence gathering for fugitive recovery",
-    version="1.5.0"
+    version="3.2.0"
 )
 
 # CORS - allow all origins for the recovery app
@@ -5189,7 +5189,7 @@ async def health_check():
         'status': 'healthy',
         'timestamp': datetime.now().isoformat(),
         'tools': tools,
-        'version': '3.0.0'
+        'version': '3.2.0'
     }
 
 
@@ -5198,7 +5198,7 @@ async def root():
     """Root endpoint with API info"""
     return {
         'name': 'Elite Recovery OSINT API',
-        'version': '3.0.0',
+        'version': '3.2.0',
         'endpoints': {
             # Username searches
             '/api/sherlock': 'Username search (400+ sites)',
