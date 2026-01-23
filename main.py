@@ -4094,9 +4094,10 @@ async def search_la_court_records(name: str, parish: str = None, dob: str = None
         if scrapingbee_key:
             try:
                 # ScrapingBee can render JavaScript and handle sessions
+                # Tyler Technologies uses Angular with hash routing
                 search_url = f"https://researchla.tylerhost.net/CourtRecordsSearch/#!/search?firstName={quote(first_name)}&lastName={quote(last_name)}"
 
-                async with httpx.AsyncClient(timeout=20.0) as client:
+                async with httpx.AsyncClient(timeout=30.0) as client:
                     scrapingbee_url = f"https://app.scrapingbee.com/api/v1/"
 
                     response = await client.get(
@@ -4105,10 +4106,11 @@ async def search_la_court_records(name: str, parish: str = None, dob: str = None
                             'api_key': scrapingbee_key,
                             'url': search_url,
                             'render_js': 'true',
-                            'wait': 3000,  # Wait 3 seconds for Angular to load (faster)
+                            'wait': 6000,  # Wait 6 seconds for Angular search to complete
                             'premium_proxy': 'true',
+                            'wait_for': '.case-number, .search-results, .results, tbody tr, .list-group-item',  # Wait for results
                         },
-                        timeout=20.0
+                        timeout=30.0
                     )
 
                     if response.status_code == 200:
@@ -4116,13 +4118,82 @@ async def search_la_court_records(name: str, parish: str = None, dob: str = None
 
                         # Parse the rendered HTML for case results
                         from bs4 import BeautifulSoup
+                        import re
                         soup = BeautifulSoup(html, 'html.parser')
 
-                        # Look for case rows (Tyler uses various table/grid formats)
-                        case_rows = soup.select('.case-row, .search-result, tr[data-case], .case-item, tbody tr')
+                        # Tyler case number patterns: "4820-F-2020", "2024-123456", etc.
+                        case_num_patterns = [
+                            r'\b(\d{4,6}-[A-Z]-\d{4})\b',  # e.g., 4820-F-2020
+                            r'\b(\d{4}-\d{5,6})\b',        # e.g., 2024-123456
+                            r'\b([A-Z]{2,3}-\d{4}-\d+)\b', # e.g., CR-2020-12345
+                        ]
 
+                        # Date patterns for filing dates
+                        date_pattern = r'\b(\d{1,2}/\d{1,2}/\d{2,4}|\w+ \d{1,2}, \d{4})\b'
+
+                        # Try multiple Tyler-specific selectors
+                        row_selectors = [
+                            '.case-row', '.search-result', '.case-item',
+                            'tr[ng-repeat]', 'tr[data-case]', 'div[ng-repeat]',
+                            '.results-row', '.case-result', '.case-listing',
+                            'tbody tr', '.list-group-item', '.card'
+                        ]
+
+                        case_rows = []
+                        for selector in row_selectors:
+                            found = soup.select(selector)
+                            if found:
+                                case_rows = found
+                                break
+
+                        # If no rows found, try finding case numbers anywhere in HTML
+                        if not case_rows:
+                            full_text = soup.get_text()
+                            for pattern in case_num_patterns:
+                                found_cases = re.findall(pattern, full_text)
+                                for case_num in found_cases:
+                                    case_data = {
+                                        'case_number': case_num,
+                                        'case_type': '',
+                                        'filing_date': '',
+                                        'status': '',
+                                        'charges': [],
+                                        'court': 'Louisiana State Court',
+                                        'has_fta': False,
+                                        'has_warrant': False
+                                    }
+
+                                    # Check surrounding context for FTA/warrant
+                                    # Find the case number position and check nearby text
+                                    idx = full_text.lower().find(case_num.lower())
+                                    if idx > 0:
+                                        context = full_text[max(0, idx-200):idx+200].lower()
+                                        for keyword in fta_keywords:
+                                            if keyword in context:
+                                                case_data['has_fta'] = True
+                                                fta_count += 1
+                                                break
+                                        for keyword in warrant_keywords:
+                                            if keyword in context:
+                                                case_data['has_warrant'] = True
+                                                warrant_count += 1
+                                                break
+                                        for keyword in active_keywords:
+                                            if keyword in context:
+                                                active_count += 1
+                                                break
+
+                                        # Try to find a date in context
+                                        date_matches = re.findall(date_pattern, context)
+                                        if date_matches:
+                                            case_data['filing_date'] = date_matches[0]
+
+                                    cases.append(case_data)
+
+                        # Process rows if found
                         for row in case_rows:
-                            case_text = row.get_text(' ', strip=True).lower()
+                            case_text = row.get_text(' ', strip=True)
+                            case_text_lower = case_text.lower()
 
                             # Extract case info
                             case_data = {
@@ -4136,34 +4207,53 @@ async def search_la_court_records(name: str, parish: str = None, dob: str = None
                                 'has_warrant': False
                             }
 
-                            # Try to find case number
-                            case_num_elem = row.select_one('.case-number, [data-case-number], td:first-child a')
-                            if case_num_elem:
-                                case_data['case_number'] = case_num_elem.get_text(strip=True)
+                            # Try to find case number with regex
+                            for pattern in case_num_patterns:
+                                match = re.search(pattern, case_text)
+                                if match:
+                                    case_data['case_number'] = match.group(1)
+                                    break
+
+                            # Fall back to element selectors
+                            if not case_data['case_number']:
+                                case_num_elem = row.select_one('.case-number, [data-case-number], td:first-child a, a')
+                                if case_num_elem:
+                                    case_data['case_number'] = case_num_elem.get_text(strip=True)
+
+                            # Try to find date
+                            date_match = re.search(date_pattern, case_text)
+                            if date_match:
+                                case_data['filing_date'] = date_match.group(1)
 
                             # Check for FTA/warrant indicators
                             for keyword in fta_keywords:
-                                if keyword in case_text:
+                                if keyword in case_text_lower:
                                     case_data['has_fta'] = True
                                     fta_count += 1
                                     break
 
                             for keyword in warrant_keywords:
-                                if keyword in case_text:
+                                if keyword in case_text_lower:
                                     case_data['has_warrant'] = True
                                     warrant_count += 1
                                     break
 
                             for keyword in active_keywords:
-                                if keyword in case_text:
+                                if keyword in case_text_lower:
                                     active_count += 1
                                     break
 
                             if case_data['case_number']:
                                 cases.append(case_data)
 
-                        if not cases and 'No results' not in html and 'no records' not in html.lower():
-                            errors.append("Could not parse results from ScrapingBee response")
+                        # Store debug info if no cases found
+                        if not cases:
+                            if 'No results' in html or 'no records' in html.lower() or '0 results' in html.lower():
+                                errors.append("No court records found for this name")
+                            else:
+                                # Store a sample of the HTML for debugging
+                                html_preview = html[:500] if len(html) > 500 else html
+                                errors.append(f"Could not parse results - HTML preview: {html_preview[:200]}...")
 
                     else:
                         errors.append(f"ScrapingBee returned {response.status_code}")
@@ -4171,101 +4261,126 @@ async def search_la_court_records(name: str, parish: str = None, dob: str = None
             except Exception as e:
                 errors.append(f"ScrapingBee error: {str(e)[:50]}")
 
-        # Fallback to direct API approach
-        if not cases and not errors:
-            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
-                # Step 1: Get login page to establish session
-                login_url = "https://researchla.tylerhost.net/CourtRecordsSearch/Account/Login"
+        # Fallback to direct API approach if ScrapingBee didn't find cases
+        if not cases and court_user and court_pass:
+            # Clear ScrapingBee parsing errors since we're trying API
+            api_errors = []
 
-                headers = {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Accept': 'application/json, text/plain, */*',
-                    'Accept-Language': 'en-US,en;q=0.9',
-                    'Origin': 'https://researchla.tylerhost.net',
-                    'Referer': 'https://researchla.tylerhost.net/CourtRecordsSearch/',
-                }
+            try:
+                async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+                    # Step 1: Get login page to establish session
+                    login_url = "https://researchla.tylerhost.net/CourtRecordsSearch/Account/Login"
 
-                # Try to authenticate
-                auth_data = {
-                    'Email': court_user,
-                    'Password': court_pass,
-                    'RememberMe': False
-                }
-
-                login_response = await client.post(
-                    login_url,
-                    json=auth_data,
-                    headers=headers
-                )
-
-                if login_response.status_code != 200:
-                    errors.append(f"Login failed: {login_response.status_code}")
-                else:
-                    # Step 2: Search for defendant
-                    search_url = "https://researchla.tylerhost.net/CourtRecordsSearch/api/Search"
-
-                    search_data = {
-                        'SearchType': 'Party',
-                        'LastName': last_name,
-                        'FirstName': first_name,
-                        'MiddleName': '',
-                        'DateOfBirth': dob or '',
-                        'CaseNumber': '',
-                        'PageNumber': 1,
-                        'PageSize': 50
+                    headers = {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        'Accept': 'application/json, text/plain, */*',
+                        'Accept-Language': 'en-US,en;q=0.9',
+                        'Content-Type': 'application/json',
+                        'Origin': 'https://researchla.tylerhost.net',
+                        'Referer': 'https://researchla.tylerhost.net/CourtRecordsSearch/',
                     }
 
-                    if parish:
-                        search_data['Court'] = parish
+                    # Try to authenticate with JSON
+                    auth_data = {
+                        'Email': court_user,
+                        'Password': court_pass,
+                        'RememberMe': False
+                    }
 
-                    search_response = await client.post(
-                        search_url,
-                        json=search_data,
+                    login_response = await client.post(
+                        login_url,
+                        json=auth_data,
                         headers=headers
                     )
 
-                if search_response.status_code == 200:
-                    try:
-                        results = search_response.json()
+                    # If JSON login fails, try form data
+                    if login_response.status_code not in [200, 302]:
+                        form_headers = headers.copy()
+                        form_headers['Content-Type'] = 'application/x-www-form-urlencoded'
+                        login_response = await client.post(
+                            login_url,
+                            data=auth_data,
+                            headers=form_headers
+                        )
 
-                        # Parse results (structure depends on Tyler's API)
-                        if isinstance(results, dict) and 'Cases' in results:
-                            for case_data in results.get('Cases', []):
-                                case = {
-                                    'case_number': case_data.get('CaseNumber', ''),
-                                    'case_type': case_data.get('CaseType', ''),
-                                    'filing_date': case_data.get('FilingDate', ''),
-                                    'status': case_data.get('Status', ''),
-                                    'charges': case_data.get('Charges', []),
-                                    'court': case_data.get('Court', ''),
-                                    'judge': case_data.get('Judge', ''),
-                                    'next_hearing': case_data.get('NextHearing', ''),
-                                    'disposition': case_data.get('Disposition', '')
-                                }
-                                cases.append(case)
+                    if login_response.status_code not in [200, 302]:
+                        api_errors.append(f"Direct API login failed: {login_response.status_code}")
+                    else:
+                        # Step 2: Search for defendant
+                        search_url = "https://researchla.tylerhost.net/CourtRecordsSearch/api/Search"
 
-                                # Count FTAs and active cases
-                                status_lower = (case.get('status') or '').lower()
-                                if 'fta' in status_lower or 'failure to appear' in status_lower or 'bench warrant' in status_lower:
-                                    fta_count += 1
-                                if 'active' in status_lower or 'open' in status_lower or 'pending' in status_lower:
-                                    active_count += 1
+                        search_data = {
+                            'SearchType': 'Party',
+                            'LastName': last_name,
+                            'FirstName': first_name,
+                            'MiddleName': '',
+                            'DateOfBirth': dob or '',
+                            'CaseNumber': '',
+                            'PageNumber': 1,
+                            'PageSize': 50
+                        }
 
-                        elif isinstance(results, list):
-                            for case_data in results:
-                                case = {
-                                    'case_number': str(case_data.get('CaseNumber', case_data.get('caseNumber', ''))),
-                                    'case_type': case_data.get('CaseType', case_data.get('caseType', '')),
-                                    'filing_date': case_data.get('FilingDate', case_data.get('filingDate', '')),
-                                    'status': case_data.get('Status', case_data.get('status', '')),
-                                    'court': case_data.get('Court', case_data.get('court', '')),
-                                }
-                                cases.append(case)
+                        if parish:
+                            search_data['Court'] = parish
 
-                    except Exception as e:
-                        errors.append(f"Failed to parse results: {str(e)[:50]}")
-                else:
-                    errors.append(f"Search failed: {search_response.status_code}")
+                        search_response = await client.post(
+                            search_url,
+                            json=search_data,
+                            headers=headers
+                        )
+
+                        if search_response.status_code == 200:
+                            try:
+                                results = search_response.json()
+
+                                # Parse results (structure depends on Tyler's API)
+                                if isinstance(results, dict) and 'Cases' in results:
+                                    for case_data in results.get('Cases', []):
+                                        case = {
+                                            'case_number': case_data.get('CaseNumber', ''),
+                                            'case_type': case_data.get('CaseType', ''),
+                                            'filing_date': case_data.get('FilingDate', ''),
+                                            'status': case_data.get('Status', ''),
+                                            'charges': case_data.get('Charges', []),
+                                            'court': case_data.get('Court', ''),
+                                            'judge': case_data.get('Judge', ''),
+                                            'next_hearing': case_data.get('NextHearing', ''),
+                                            'disposition': case_data.get('Disposition', '')
+                                        }
+                                        cases.append(case)
+
+                                        # Count FTAs and active cases
+                                        status_lower = (case.get('status') or '').lower()
+                                        if 'fta' in status_lower or 'failure to appear' in status_lower or 'bench warrant' in status_lower:
+                                            fta_count += 1
+                                        if 'active' in status_lower or 'open' in status_lower or 'pending' in status_lower:
+                                            active_count += 1
+
+                                elif isinstance(results, list):
+                                    for case_data in results:
+                                        case = {
+                                            'case_number': str(case_data.get('CaseNumber', case_data.get('caseNumber', ''))),
+                                            'case_type': case_data.get('CaseType', case_data.get('caseType', '')),
+                                            'filing_date': case_data.get('FilingDate', case_data.get('filingDate', '')),
+                                            'status': case_data.get('Status', case_data.get('status', '')),
+                                            'court': case_data.get('Court', case_data.get('court', '')),
+                                        }
+                                        cases.append(case)
+
+                                # Clear ScrapingBee errors if API succeeded
+                                if cases:
+                                    errors = []
+
+                            except Exception as e:
+                                api_errors.append(f"API parse error: {str(e)[:50]}")
+                        else:
+                            api_errors.append(f"API search failed: {search_response.status_code}")
+
+            except Exception as e:
+                api_errors.append(f"Direct API error: {str(e)[:50]}")
+
+            # Add API errors to main errors list
+            errors.extend(api_errors)
 
     except Exception as e:
         errors.append(f"Court search error: {str(e)[:100]}")
