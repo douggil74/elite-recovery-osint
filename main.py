@@ -2066,6 +2066,7 @@ def generate_username_variations(full_name: str, include_name_variants: bool = T
     """
     Generate common username variations from a name.
     Now includes nickname variants (Doug → Douglas, Bill → William, etc.)
+    Optimized to search most common patterns first.
     """
     parts = full_name.lower().split()
     if len(parts) < 2:
@@ -2081,16 +2082,24 @@ def generate_username_variations(full_name: str, include_name_variants: bool = T
     first_names = [first]
     if include_name_variants:
         first_names = get_name_variants(first)
+        # Ensure original name is first
+        if first in first_names:
+            first_names.remove(first)
+        first_names = [first] + first_names
 
     variations = []
 
-    # Generate variations for each first name variant
+    # FIRST: Add the most common patterns for EACH name variant
+    # This ensures both "douggilford" AND "douglasgilford" are in top results
+    for fname in first_names:
+        variations.append(f"{fname}{last}")        # douggilford, douglasgilford
+        variations.append(f"{fname}_{last}")       # doug_gilford, douglas_gilford
+        variations.append(f"{fname}.{last}")       # doug.gilford, douglas.gilford
+
+    # THEN: Add secondary patterns
     for fname in first_names:
         f_initial = fname[0] if fname else ""
         variations.extend([
-            f"{fname}{last}",           # douggilford, douglasgilford
-            f"{fname}_{last}",          # doug_gilford
-            f"{fname}.{last}",          # doug.gilford
             f"{fname}-{last}",          # doug-gilford
             f"{last}{fname}",           # gilforddoug
             f"{f_initial}{last}",       # dgilford
@@ -2523,7 +2532,8 @@ async def investigate_person(request: InvestigatePersonRequest):
     })
 
     # Generate smart username variations for ALL name variants
-    username_variations = generate_username_variations(request.name, include_name_variants=True)[:10]  # Top 10
+    # Increased from 10 to 20 to ensure all name variants get adequate coverage
+    username_variations = generate_username_variations(request.name, include_name_variants=True)[:20]
     discovered_usernames.extend(username_variations)
 
     loop = asyncio.get_event_loop()
