@@ -4920,6 +4920,15 @@ async def calculate_fta_risk(request: FTAScoreRequest):
 
     execution_time = (datetime.now() - start_time).total_seconds()
 
+    # Build search status info
+    search_status = {
+        "federal_search": "completed" if isinstance(federal_records, list) else "failed",
+        "la_search": "completed" if isinstance(la_records, dict) else "failed",
+        "prior_bookings_search": "completed" if isinstance(prior_bookings, list) else "failed",
+        "la_credentials_set": bool(os.environ.get('LA_COURT_USERNAME')),
+        "scrapingbee_set": bool(os.environ.get('SCRAPINGBEE_API_KEY')),
+    }
+
     return {
         "name": request.name,
         "score": score,
@@ -4928,7 +4937,8 @@ async def calculate_fta_risk(request: FTAScoreRequest):
         "prior_bookings": prior_bookings,
         "court_records": court_records,
         "ai_analysis": ai_analysis,
-        "execution_time": execution_time
+        "execution_time": execution_time,
+        "search_status": search_status
     }
 
 
