@@ -4090,27 +4090,67 @@ async def search_la_court_records(name: str, parish: str = None, dob: str = None
     active_keywords = ['active', 'open', 'pending', 'arraignment', 'trial']
 
     try:
-        # Try ScrapingBee first (has JavaScript rendering for Angular sites)
-        if scrapingbee_key:
+        # Use ScrapingBee with JavaScript scenario to properly interact with Tyler's Angular app
+        if scrapingbee_key and court_user and court_pass:
             try:
-                # ScrapingBee can render JavaScript and handle sessions
-                # Tyler Technologies uses Angular with hash routing
-                search_url = f"https://researchla.tylerhost.net/CourtRecordsSearch/#!/search?firstName={quote(first_name)}&lastName={quote(last_name)}"
+                # Tyler Technologies Angular app requires proper login and form interaction
+                # Using ScrapingBee's js_scenario to automate the full flow
+                login_url = "https://researchla.tylerhost.net/CourtRecordsSearch/"
 
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    scrapingbee_url = f"https://app.scrapingbee.com/api/v1/"
+                # JavaScript scenario to:
+                # 1. Click login link
+                # 2. Enter credentials
+                # 3. Submit login
+                # 4. Navigate to search
+                # 5. Fill search form
+                # 6. Submit search
+                # 7. Wait for results
+                js_scenario = {
+                    "instructions": [
+                        # Wait for page to load
+                        {"wait": 2000},
+                        # Click the login/sign in link
+                        {"click": "a[href*='Login'], .login-link, a:contains('Sign In'), a:contains('Login')"},
+                        {"wait": 2000},
+                        # Fill in email/username
+                        {"fill": ["input[name='Email'], input[type='email'], #Email", court_user]},
+                        {"wait": 500},
+                        # Fill in password
+                        {"fill": ["input[name='Password'], input[type='password'], #Password", court_pass]},
+                        {"wait": 500},
+                        # Click submit/login button
+                        {"click": "button[type='submit'], input[type='submit'], .btn-primary, button:contains('Log In')"},
+                        {"wait": 3000},
+                        # Navigate to search page
+                        {"click": "a[href*='search'], .search-link, a:contains('Search')"},
+                        {"wait": 2000},
+                        # Fill in last name
+                        {"fill": [f"input[name='LastName'], input[ng-model*='lastName'], #LastName", last_name]},
+                        {"wait": 500},
+                        # Fill in first name
+                        {"fill": [f"input[name='FirstName'], input[ng-model*='firstName'], #FirstName", first_name]},
+                        {"wait": 500},
+                        # Click search button
+                        {"click": "button[type='submit'], .btn-search, button:contains('Search'), input[value='Search']"},
+                        # Wait for results to load
+                        {"wait": 5000},
+                    ]
+                }
+
+                async with httpx.AsyncClient(timeout=60.0) as client:
+                    scrapingbee_url = "https://app.scrapingbee.com/api/v1/"
 
                     response = await client.get(
                         scrapingbee_url,
                         params={
                             'api_key': scrapingbee_key,
-                            'url': search_url,
+                            'url': login_url,
                             'render_js': 'true',
-                            'wait': 6000,  # Wait 6 seconds for Angular search to complete
+                            'js_scenario': json.dumps(js_scenario),
                             'premium_proxy': 'true',
-                            'wait_for': '.case-number, .search-results, .results, tbody tr, .list-group-item',  # Wait for results
+                            'timeout': 50000,
                         },
-                        timeout=30.0
+                        timeout=60.0
                     )
 
                     if response.status_code == 200:
@@ -4248,12 +4288,20 @@ async def search_la_court_records(name: str, parish: str = None, dob: str = None
 
                         # Store debug info if no cases found
                         if not cases:
-                            if 'No results' in html or 'no records' in html.lower() or '0 results' in html.lower():
-                                errors.append("No court records found for this name")
+                            # Check what state we're in
+                            if 'login' in html.lower() or 'sign in' in html.lower() or 'password' in html.lower():
+                                errors.append("Login failed - still on login page. Check credentials.")
+                            elif 'No results' in html or 'no records' in html.lower() or '0 results' in html.lower() or 'no cases' in html.lower():
+                                errors.append("No court records found for this name in Louisiana")
+                            elif 'search' in html.lower() and ('first' in html.lower() or 'last' in html.lower()):
+                                errors.append("On search page but no results. Search may not have executed.")
                             else:
-                                # Store a sample of the HTML for debugging
-                                html_preview = html[:500] if len(html) > 500 else html
-                                errors.append(f"Could not parse results - HTML preview: {html_preview[:200]}...")
+                                # Show what page title or key content we got
+                                title_elem = soup.find('title')
+                                page_title = title_elem.get_text(strip=True) if title_elem else 'Unknown'
+                                # Get body text sample
+                                body_text = soup.get_text()[:300].replace('\n', ' ').strip()
+                                errors.append(f"Page: {page_title}. Content: {body_text[:150]}...")
 
                     else:
                         errors.append(f"ScrapingBee returned {response.status_code}")
