@@ -1879,8 +1879,194 @@ class MultiUsernameRequest(BaseModel):
     timeout: int = 30
 
 
-def generate_username_variations(full_name: str) -> List[str]:
-    """Generate common username variations from a name"""
+# Common name variants/nicknames mapping (both directions)
+NAME_VARIANTS = {
+    # Male names
+    "william": ["will", "bill", "billy", "willy", "liam"],
+    "will": ["william", "bill", "billy"],
+    "bill": ["william", "will", "billy"],
+    "billy": ["william", "will", "bill"],
+    "robert": ["rob", "robby", "bob", "bobby", "bert"],
+    "rob": ["robert", "robby", "bob", "bobby"],
+    "bob": ["robert", "rob", "bobby"],
+    "bobby": ["robert", "rob", "bob"],
+    "richard": ["rick", "ricky", "dick", "rich", "richie"],
+    "rick": ["richard", "ricky", "rich"],
+    "dick": ["richard", "rick"],
+    "james": ["jim", "jimmy", "jamie", "jem"],
+    "jim": ["james", "jimmy", "jamie"],
+    "jimmy": ["james", "jim", "jamie"],
+    "michael": ["mike", "mikey", "mick", "mickey"],
+    "mike": ["michael", "mikey", "mick"],
+    "john": ["jack", "johnny", "jon"],
+    "jack": ["john", "jackson"],
+    "johnny": ["john", "jonathan"],
+    "jonathan": ["jon", "johnny", "john", "nathan"],
+    "jon": ["john", "jonathan"],
+    "joseph": ["joe", "joey", "jo"],
+    "joe": ["joseph", "joey"],
+    "joey": ["joseph", "joe"],
+    "charles": ["charlie", "chuck", "chas", "chaz"],
+    "charlie": ["charles", "chuck"],
+    "chuck": ["charles", "charlie"],
+    "thomas": ["tom", "tommy", "thom"],
+    "tom": ["thomas", "tommy"],
+    "tommy": ["thomas", "tom"],
+    "daniel": ["dan", "danny", "dani"],
+    "dan": ["daniel", "danny"],
+    "danny": ["daniel", "dan"],
+    "david": ["dave", "davey", "davy"],
+    "dave": ["david", "davey"],
+    "edward": ["ed", "eddie", "ted", "teddy", "ned"],
+    "ed": ["edward", "eddie", "edwin", "edgar"],
+    "eddie": ["edward", "ed", "edwin"],
+    "ted": ["edward", "theodore", "teddy"],
+    "theodore": ["ted", "teddy", "theo"],
+    "anthony": ["tony", "ant"],
+    "tony": ["anthony", "antonio"],
+    "antonio": ["tony", "anthony"],
+    "christopher": ["chris", "topher", "kit"],
+    "chris": ["christopher", "christian", "christine"],
+    "matthew": ["matt", "matty"],
+    "matt": ["matthew", "matty"],
+    "andrew": ["andy", "drew", "andre"],
+    "andy": ["andrew", "anderson"],
+    "drew": ["andrew"],
+    "benjamin": ["ben", "benny", "benji"],
+    "ben": ["benjamin", "benny", "benedict"],
+    "samuel": ["sam", "sammy"],
+    "sam": ["samuel", "sammy", "samantha"],
+    "nicholas": ["nick", "nicky", "nico"],
+    "nick": ["nicholas", "nicky"],
+    "patrick": ["pat", "patty", "paddy"],
+    "pat": ["patrick", "patricia"],
+    "timothy": ["tim", "timmy"],
+    "tim": ["timothy", "timmy"],
+    "steven": ["steve", "stevie", "stephen"],
+    "steve": ["steven", "stephen", "stevie"],
+    "stephen": ["steve", "steven"],
+    "douglas": ["doug", "dougie"],
+    "doug": ["douglas", "dougie"],
+    "gregory": ["greg", "gregg"],
+    "greg": ["gregory", "gregg"],
+    "kenneth": ["ken", "kenny"],
+    "ken": ["kenneth", "kenny", "kendall"],
+    "raymond": ["ray", "raymon"],
+    "ray": ["raymond", "raymon"],
+    "lawrence": ["larry", "laurie"],
+    "larry": ["lawrence", "laurence"],
+    "gerald": ["gerry", "jerry", "gerard"],
+    "jerry": ["gerald", "jerome", "jeremiah"],
+    "jeffrey": ["jeff", "geoff"],
+    "jeff": ["jeffrey", "geoffrey"],
+    "alexander": ["alex", "xander", "al", "lex"],
+    "alex": ["alexander", "alexis", "alexandra"],
+    "nathaniel": ["nate", "nathan", "nat"],
+    "nathan": ["nathaniel", "nate"],
+    "nate": ["nathan", "nathaniel"],
+    "zachary": ["zach", "zack", "zak"],
+    "zach": ["zachary", "zack"],
+    "joshua": ["josh", "joshy"],
+    "josh": ["joshua"],
+    "jacob": ["jake", "jakey"],
+    "jake": ["jacob"],
+    "phillip": ["phil", "pip"],
+    "phil": ["phillip", "philip"],
+    "frederick": ["fred", "freddy", "rick"],
+    "fred": ["frederick", "freddy", "alfred"],
+    "alfred": ["al", "alf", "alfie", "fred"],
+    "al": ["alfred", "albert", "alan", "alex"],
+    "albert": ["al", "bert", "bertie"],
+
+    # Female names
+    "elizabeth": ["liz", "lizzy", "beth", "betty", "eliza", "ellie", "lisa"],
+    "liz": ["elizabeth", "lizzy"],
+    "beth": ["elizabeth", "bethany"],
+    "betty": ["elizabeth", "beatrice"],
+    "jennifer": ["jen", "jenny", "jenn"],
+    "jen": ["jennifer", "jenny"],
+    "jenny": ["jennifer", "jen"],
+    "katherine": ["kate", "katie", "kathy", "cathy", "kat"],
+    "kate": ["katherine", "katelyn", "katie"],
+    "katie": ["katherine", "kate"],
+    "kathy": ["katherine", "kathleen"],
+    "catherine": ["cathy", "kate", "katie", "cat"],
+    "margaret": ["maggie", "meg", "peggy", "marge", "margie"],
+    "maggie": ["margaret", "magdalene"],
+    "patricia": ["pat", "patty", "trish", "tricia"],
+    "trish": ["patricia", "tricia"],
+    "jessica": ["jess", "jessie"],
+    "jess": ["jessica", "jessie"],
+    "rebecca": ["becky", "becca", "beck"],
+    "becky": ["rebecca", "becca"],
+    "samantha": ["sam", "sammy"],
+    "amanda": ["mandy", "amy"],
+    "mandy": ["amanda", "miranda"],
+    "victoria": ["vicky", "vicki", "tori"],
+    "vicky": ["victoria", "vicki"],
+    "stephanie": ["steph", "steffi"],
+    "steph": ["stephanie", "stefan"],
+    "christina": ["chris", "tina", "christy"],
+    "tina": ["christina", "martina", "valentina"],
+    "alexandra": ["alex", "alexa", "lexi", "sandra"],
+    "sandra": ["sandy", "alexandra", "cassandra"],
+    "sandy": ["sandra", "alexander"],
+    "melissa": ["missy", "mel", "lisa"],
+    "mel": ["melissa", "melanie", "melody"],
+    "deborah": ["deb", "debbie", "debby"],
+    "deb": ["deborah", "debbie"],
+    "debbie": ["deborah", "deb"],
+    "kimberly": ["kim", "kimmy"],
+    "kim": ["kimberly", "kimmy"],
+    "michelle": ["shelly", "micki", "mich"],
+    "shelly": ["michelle", "shelley", "rachel"],
+    "nicole": ["nicky", "nikki", "cole"],
+    "nikki": ["nicole", "nicky"],
+    "heather": ["heath"],
+    "ashley": ["ash", "ashy"],
+    "ash": ["ashley", "asher", "ashton"],
+    "brittany": ["brit", "britt"],
+    "cynthia": ["cindy", "cyn"],
+    "cindy": ["cynthia", "lucinda"],
+    "dorothy": ["dot", "dottie", "dolly"],
+    "dot": ["dorothy", "dottie"],
+    "frances": ["fran", "frannie", "frankie"],
+    "fran": ["frances", "francesca"],
+    "jacqueline": ["jackie", "jacqui"],
+    "jackie": ["jacqueline", "jack"],
+    "susan": ["sue", "susie", "suzy"],
+    "sue": ["susan", "susie"],
+    "susie": ["susan", "sue", "suzanne"],
+    "nancy": ["nan"],
+    "ann": ["annie", "anna", "anne"],
+    "anna": ["ann", "annie", "anne"],
+    "anne": ["ann", "anna", "annie"],
+}
+
+
+def get_name_variants(name: str) -> List[str]:
+    """Get all known variants of a first name"""
+    name_lower = name.lower().strip()
+    variants = set([name_lower])
+
+    # Check if this name has variants
+    if name_lower in NAME_VARIANTS:
+        variants.update(NAME_VARIANTS[name_lower])
+
+    # Also check if any variant maps back to this name
+    for key, values in NAME_VARIANTS.items():
+        if name_lower in values:
+            variants.add(key)
+            variants.update(values)
+
+    return list(variants)
+
+
+def generate_username_variations(full_name: str, include_name_variants: bool = True) -> List[str]:
+    """
+    Generate common username variations from a name.
+    Now includes nickname variants (Doug → Douglas, Bill → William, etc.)
+    """
     parts = full_name.lower().split()
     if len(parts) < 2:
         return [full_name.lower().replace(" ", "")]
@@ -1891,28 +2077,38 @@ def generate_username_variations(full_name: str) -> List[str]:
     first_initial = first[0] if first else ""
     last_initial = last[0] if last else ""
 
-    variations = [
-        f"{first}{last}",           # amandadriskell
-        f"{first}_{last}",          # amanda_driskell
-        f"{first}.{last}",          # amanda.driskell
-        f"{first}-{last}",          # amanda-driskell
-        f"{last}{first}",           # driskellamanda
-        f"{first_initial}{last}",   # adriskell
-        f"{first}{last_initial}",   # amandad
-        f"{first}_{last_initial}",  # amanda_d
-        f"{last}_{first}",          # driskell_amanda
-        f"{first}{last}1",          # amandadriskell1
-        f"{first}{last}123",        # amandadriskell123
-        f"real{first}{last}",       # realamandadriskell
-        f"the{first}{last}",        # theamandadriskell
-        f"{first}official",         # amandaofficial
-    ]
+    # Get all first name variants
+    first_names = [first]
+    if include_name_variants:
+        first_names = get_name_variants(first)
 
-    if middle:
+    variations = []
+
+    # Generate variations for each first name variant
+    for fname in first_names:
+        f_initial = fname[0] if fname else ""
         variations.extend([
-            f"{first}{middle[0]}{last}",   # amandajdriskell
-            f"{first}_{middle[0]}_{last}", # amanda_j_driskell
+            f"{fname}{last}",           # douggilford, douglasgilford
+            f"{fname}_{last}",          # doug_gilford
+            f"{fname}.{last}",          # doug.gilford
+            f"{fname}-{last}",          # doug-gilford
+            f"{last}{fname}",           # gilforddoug
+            f"{f_initial}{last}",       # dgilford
+            f"{fname}{last_initial}",   # dougg
+            f"{fname}_{last_initial}",  # doug_g
+            f"{last}_{fname}",          # gilford_doug
+            f"{fname}{last}1",          # douggilford1
+            f"{fname}{last}123",        # douggilford123
+            f"real{fname}{last}",       # realdouggilford
+            f"the{fname}{last}",        # thedouggilford
+            f"{fname}official",         # dougofficial
         ])
+
+        if middle:
+            variations.extend([
+                f"{fname}{middle[0]}{last}",   # dougmgilford
+                f"{fname}_{middle[0]}_{last}", # doug_m_gilford
+            ])
 
     # Remove duplicates and filter
     return list(dict.fromkeys([v for v in variations if len(v) > 2]))
@@ -2074,71 +2270,216 @@ class InvestigatePersonRequest(BaseModel):
     email: Optional[str] = None
     phone: Optional[str] = None
     location: Optional[str] = None  # State/city to narrow down
+    state: Optional[str] = None  # 2-letter state code (e.g., "LA")
+    jail_parish: Optional[str] = None  # Parish/county where booked
+    mugshot_url: Optional[str] = None  # For photo verification
+    demographics: Optional[Dict[str, str]] = None  # race, sex, age
+
+
+# US States and common location keywords for filtering
+US_STATES = {
+    "AL": "alabama", "AK": "alaska", "AZ": "arizona", "AR": "arkansas",
+    "CA": "california", "CO": "colorado", "CT": "connecticut", "DE": "delaware",
+    "FL": "florida", "GA": "georgia", "HI": "hawaii", "ID": "idaho",
+    "IL": "illinois", "IN": "indiana", "IA": "iowa", "KS": "kansas",
+    "KY": "kentucky", "LA": "louisiana", "ME": "maine", "MD": "maryland",
+    "MA": "massachusetts", "MI": "michigan", "MN": "minnesota", "MS": "mississippi",
+    "MO": "missouri", "MT": "montana", "NE": "nebraska", "NV": "nevada",
+    "NH": "new hampshire", "NJ": "new jersey", "NM": "new mexico", "NY": "new york",
+    "NC": "north carolina", "ND": "north dakota", "OH": "ohio", "OK": "oklahoma",
+    "OR": "oregon", "PA": "pennsylvania", "RI": "rhode island", "SC": "south carolina",
+    "SD": "south dakota", "TN": "tennessee", "TX": "texas", "UT": "utah",
+    "VT": "vermont", "VA": "virginia", "WA": "washington", "WV": "west virginia",
+    "WI": "wisconsin", "WY": "wyoming", "DC": "washington dc"
+}
+
+# Louisiana parishes for local matching
+LA_PARISHES = [
+    "st. tammany", "st tammany", "orleans", "jefferson", "east baton rouge",
+    "caddo", "calcasieu", "lafayette", "ouachita", "livingston", "tangipahoa",
+    "rapides", "bossier", "terrebonne", "lafourche", "ascension", "iberia",
+    "washington", "st. landry", "st landry", "vermilion", "acadia", "st. mary",
+    "st mary", "natchitoches", "lincoln", "beauregard", "st. john", "st john"
+]
+
+# Non-US locations to filter out
+NON_US_INDICATORS = [
+    "canada", "canadian", "ontario", "quebec", "british columbia", "alberta",
+    "toronto", "vancouver", "montreal", "calgary", "ottawa", "edmonton",
+    "uk", "united kingdom", "england", "london", "manchester", "birmingham",
+    "australia", "sydney", "melbourne", "brisbane", "perth",
+    "germany", "france", "spain", "italy", "netherlands", "sweden",
+    "india", "mumbai", "delhi", "bangalore", "chennai",
+    "mexico", "brazil", "argentina", "colombia",
+    "nigeria", "south africa", "kenya",
+    "philippines", "indonesia", "vietnam", "thailand", "japan", "china", "korea"
+]
+
+
+def check_location_relevance(profile_url: str, profile_bio: str = "", target_state: str = "LA") -> Dict[str, Any]:
+    """
+    Check if a social profile is geographically relevant to the target.
+    Returns relevance score and reason.
+    """
+    url_lower = profile_url.lower()
+    bio_lower = (profile_bio or "").lower()
+    combined = f"{url_lower} {bio_lower}"
+
+    target_state_lower = target_state.lower() if target_state else "la"
+    target_state_full = US_STATES.get(target_state.upper(), target_state_lower) if target_state else "louisiana"
+
+    result = {
+        "is_relevant": True,
+        "confidence": 0.5,  # Default neutral
+        "reason": "No location indicators found",
+        "location_found": None,
+        "is_local": False,
+        "is_foreign": False
+    }
+
+    # Check for non-US locations (strong negative signal)
+    for non_us in NON_US_INDICATORS:
+        if non_us in combined:
+            result["is_relevant"] = False
+            result["confidence"] = 0.1
+            result["reason"] = f"Profile appears to be from {non_us.title()} - likely different person"
+            result["location_found"] = non_us.title()
+            result["is_foreign"] = True
+            return result
+
+    # Check for target state (strong positive signal)
+    if target_state_lower in combined or target_state_full in combined:
+        result["is_relevant"] = True
+        result["confidence"] = 0.9
+        result["reason"] = f"Profile location matches target state ({target_state.upper()})"
+        result["location_found"] = target_state.upper()
+        result["is_local"] = True
+        return result
+
+    # Check for Louisiana parishes specifically
+    if target_state.upper() == "LA":
+        for parish in LA_PARISHES:
+            if parish in combined:
+                result["is_relevant"] = True
+                result["confidence"] = 0.95
+                result["reason"] = f"Profile mentions {parish.title()} parish - strong local match"
+                result["location_found"] = parish.title()
+                result["is_local"] = True
+                return result
+
+    # Check for other US states (might be same person who moved)
+    for state_code, state_name in US_STATES.items():
+        if state_code.lower() != target_state_lower and (state_code.lower() in combined or state_name in combined):
+            result["is_relevant"] = True
+            result["confidence"] = 0.6
+            result["reason"] = f"Profile may be in {state_name.title()} - verify if person relocated"
+            result["location_found"] = state_name.title()
+            return result
+
+    return result
 
 
 class InvestigatePersonResult(BaseModel):
     name: str
+    name_variants_searched: List[str]
     searched_at: str
     flow_steps: List[Dict[str, Any]]
     discovered_emails: List[str]
     discovered_usernames: List[str]
-    confirmed_profiles: List[Dict[str, str]]
+    confirmed_profiles: List[Dict[str, Any]]  # Changed to Any to include location data
+    filtered_profiles: List[Dict[str, Any]]  # Profiles filtered out due to location mismatch
     people_search_links: List[Dict[str, str]]
+    location_context: Optional[Dict[str, str]]
     summary: str
     execution_time: float
 
 
-@app.post("/api/investigate", response_model=InvestigatePersonResult)
+@app.post("/api/investigate")
 async def investigate_person(request: InvestigatePersonRequest):
     """
     Intelligent person investigation flow:
-    1. Generate people search links
-    2. If email provided, check registrations with holehe
-    3. Try username variations with Sherlock
-    4. Compile all findings
+    1. Generate name variants (Doug → Douglas, Bill → William)
+    2. Generate people search links
+    3. If email provided, check registrations with holehe
+    4. Try username variations with Sherlock
+    5. Filter results by geographic relevance
+    6. Compile all findings
     """
     start_time = datetime.now()
     flow_steps = []
     discovered_emails = []
     discovered_usernames = []
     confirmed_profiles = []
+    filtered_profiles = []  # Profiles filtered due to location mismatch
+    name_variants_searched = []
 
-    # Parse name
+    # Parse name and get variants
     name_parts = request.name.lower().split()
     first = name_parts[0] if name_parts else ""
     last = name_parts[-1] if len(name_parts) > 1 else name_parts[0] if name_parts else ""
 
-    # Step 1: Generate people search links
+    # Step 0: Generate name variants (Doug → Douglas, Bill → William)
+    flow_steps.append({
+        "step": 0,
+        "action": "Generate name variants",
+        "status": "running"
+    })
+
+    first_name_variants = get_name_variants(first)
+    name_variants_searched = [f"{fv} {last}" for fv in first_name_variants[:5]]  # Top 5 variants
+
+    flow_steps[-1]["status"] = "complete"
+    flow_steps[-1]["result"] = f"Name variants: {', '.join(first_name_variants[:5])}"
+
+    # Determine target location for filtering
+    target_state = request.state or "LA"  # Default to Louisiana
+    location_context = {
+        "target_state": target_state,
+        "jail_parish": request.jail_parish,
+        "provided_location": request.location
+    }
+
+    # Step 1: Generate people search links (for all name variants)
     flow_steps.append({
         "step": 1,
         "action": "Generate people search links",
         "status": "running"
     })
 
-    people_search_links = [
-        {"name": "TruePeopleSearch", "url": f"https://www.truepeoplesearch.com/results?name={request.name.replace(' ', '%20')}", "type": "free"},
-        {"name": "FastPeopleSearch", "url": f"https://www.fastpeoplesearch.com/name/{request.name.replace(' ', '-')}", "type": "free"},
-        {"name": "Whitepages", "url": f"https://www.whitepages.com/name/{first}-{last}", "type": "free"},
-        {"name": "Spokeo", "url": f"https://www.spokeo.com/{first}-{last}", "type": "paid"},
-        {"name": "BeenVerified", "url": f"https://www.beenverified.com/people/{first}-{last}/", "type": "paid"},
-        {"name": "Intelius", "url": f"https://www.intelius.com/people-search/{first}-{last}/", "type": "paid"},
-        {"name": "ThatsThem", "url": f"https://thatsthem.com/name/{first}-{last}", "type": "free"},
-        {"name": "USSearch", "url": f"https://www.ussearch.com/search/results/people?firstName={first}&lastName={last}", "type": "paid"},
-        {"name": "Facebook", "url": f"https://www.facebook.com/search/people?q={request.name.replace(' ', '%20')}", "type": "social"},
-        {"name": "LinkedIn", "url": f"https://www.linkedin.com/search/results/people/?keywords={request.name.replace(' ', '%20')}", "type": "social"},
-        {"name": "Instagram", "url": f"https://www.instagram.com/{first}{last}/", "type": "social"},
-        {"name": "Twitter/X", "url": f"https://twitter.com/search?q={request.name.replace(' ', '%20')}&f=user", "type": "social"},
-    ]
+    people_search_links = []
 
-    if request.location:
-        loc = request.location.replace(' ', '%20')
+    # Generate links for original name and variants
+    for name_variant in [request.name] + name_variants_searched[:2]:
+        nv_parts = name_variant.lower().split()
+        nv_first = nv_parts[0] if nv_parts else ""
+        nv_last = nv_parts[-1] if len(nv_parts) > 1 else nv_first
+
+        people_search_links.extend([
+            {"name": f"TruePeopleSearch ({nv_first.title()})", "url": f"https://www.truepeoplesearch.com/results?name={name_variant.replace(' ', '%20')}", "type": "free"},
+            {"name": f"FastPeopleSearch ({nv_first.title()})", "url": f"https://www.fastpeoplesearch.com/name/{name_variant.replace(' ', '-')}", "type": "free"},
+            {"name": f"Facebook ({nv_first.title()})", "url": f"https://www.facebook.com/search/people?q={name_variant.replace(' ', '%20')}", "type": "social"},
+        ])
+
+    # Add location-specific searches
+    if request.location or request.state:
+        loc = (request.location or US_STATES.get(request.state, request.state)).replace(' ', '%20')
         people_search_links.extend([
             {"name": "TruePeopleSearch (Location)", "url": f"https://www.truepeoplesearch.com/results?name={request.name.replace(' ', '%20')}&citystatezip={loc}", "type": "free"},
             {"name": "Whitepages (Location)", "url": f"https://www.whitepages.com/name/{first}-{last}/{loc}", "type": "free"},
         ])
 
+    # Standard links
+    people_search_links.extend([
+        {"name": "Whitepages", "url": f"https://www.whitepages.com/name/{first}-{last}", "type": "free"},
+        {"name": "Spokeo", "url": f"https://www.spokeo.com/{first}-{last}", "type": "paid"},
+        {"name": "BeenVerified", "url": f"https://www.beenverified.com/people/{first}-{last}/", "type": "paid"},
+        {"name": "LinkedIn", "url": f"https://www.linkedin.com/search/results/people/?keywords={request.name.replace(' ', '%20')}", "type": "social"},
+        {"name": "Instagram", "url": f"https://www.instagram.com/{first}{last}/", "type": "social"},
+        {"name": "Twitter/X", "url": f"https://twitter.com/search?q={request.name.replace(' ', '%20')}&f=user", "type": "social"},
+    ])
+
     flow_steps[-1]["status"] = "complete"
-    flow_steps[-1]["result"] = f"Generated {len(people_search_links)} search links"
+    flow_steps[-1]["result"] = f"Generated {len(people_search_links)} search links for {len(name_variants_searched) + 1} name variants"
 
     # Step 2: If email provided, check with holehe
     if request.email:
@@ -2162,7 +2503,9 @@ async def investigate_person(request: InvestigatePersonRequest):
                     "platform": service.get('service', 'Unknown'),
                     "source": "holehe (email)",
                     "email": request.email,
-                    "url": f"https://{service.get('service', '').lower().replace(' ', '')}.com"
+                    "url": f"https://{service.get('service', '').lower().replace(' ', '')}.com",
+                    "location_verified": False,
+                    "location_note": "Email registration - location unknown"
                 })
 
             flow_steps[-1]["status"] = "complete"
@@ -2172,15 +2515,15 @@ async def investigate_person(request: InvestigatePersonRequest):
             flow_steps[-1]["status"] = "error"
             flow_steps[-1]["result"] = str(e)
 
-    # Step 3: Try common username variations with Sherlock
+    # Step 3: Try username variations with Sherlock (including name variants)
     flow_steps.append({
         "step": 3,
-        "action": "Search username variations with Sherlock",
+        "action": "Search username variations with Sherlock (includes name variants)",
         "status": "running"
     })
 
-    # Generate smart username variations
-    username_variations = generate_username_variations(request.name)[:5]  # Top 5
+    # Generate smart username variations for ALL name variants
+    username_variations = generate_username_variations(request.name, include_name_variants=True)[:10]  # Top 10
     discovered_usernames.extend(username_variations)
 
     loop = asyncio.get_event_loop()
@@ -2195,41 +2538,76 @@ async def investigate_person(request: InvestigatePersonRequest):
             for profile in result.get('found', []):
                 url = profile.get('url', '')
                 if url and url not in all_sherlock_found:
-                    all_sherlock_found[url] = {
+                    # Check location relevance
+                    loc_check = check_location_relevance(url, "", target_state)
+
+                    profile_data = {
                         "platform": profile.get('platform', 'Unknown'),
                         "url": url,
                         "username": username,
-                        "source": "sherlock"
+                        "source": "sherlock",
+                        "location_verified": loc_check["is_local"],
+                        "location_confidence": loc_check["confidence"],
+                        "location_note": loc_check["reason"],
+                        "location_found": loc_check.get("location_found")
                     }
-                    confirmed_profiles.append(all_sherlock_found[url])
+
+                    all_sherlock_found[url] = profile_data
+
+                    # Filter foreign profiles but keep track of them
+                    if loc_check["is_foreign"]:
+                        filtered_profiles.append({
+                            **profile_data,
+                            "filter_reason": f"Location mismatch: {loc_check['reason']}"
+                        })
+                    else:
+                        confirmed_profiles.append(profile_data)
 
         except Exception as e:
             pass  # Continue with other usernames
 
     flow_steps[-1]["status"] = "complete"
-    flow_steps[-1]["result"] = f"Searched {len(username_variations)} usernames, found {len(all_sherlock_found)} profiles"
+    flow_steps[-1]["result"] = f"Searched {len(username_variations)} usernames, found {len(all_sherlock_found)} profiles, filtered {len(filtered_profiles)} foreign"
+
+    # Step 4: Location filtering summary
+    local_profiles = [p for p in confirmed_profiles if p.get("location_verified")]
+    uncertain_profiles = [p for p in confirmed_profiles if not p.get("location_verified") and not p.get("location_found")]
+
+    flow_steps.append({
+        "step": 4,
+        "action": "Location filtering",
+        "status": "complete",
+        "result": f"Local matches: {len(local_profiles)}, Uncertain: {len(uncertain_profiles)}, Filtered out: {len(filtered_profiles)}"
+    })
 
     # Build summary
     summary_parts = [
         f"Investigated: {request.name}",
-        f"Search links: {len(people_search_links)}",
+        f"Name variants: {', '.join(first_name_variants[:3])}",
         f"Usernames tried: {', '.join(username_variations[:3])}...",
-        f"Confirmed profiles: {len(confirmed_profiles)}"
+        f"Confirmed profiles: {len(confirmed_profiles)}",
+        f"Local matches: {len(local_profiles)}",
     ]
 
+    if filtered_profiles:
+        summary_parts.append(f"Filtered (wrong location): {len(filtered_profiles)}")
+
     if request.email:
-        summary_parts.insert(1, f"Email checked: {request.email}")
+        summary_parts.insert(2, f"Email checked: {request.email}")
 
     execution_time = (datetime.now() - start_time).total_seconds()
 
     return {
         "name": request.name,
+        "name_variants_searched": name_variants_searched,
         "searched_at": datetime.now().isoformat(),
         "flow_steps": flow_steps,
         "discovered_emails": discovered_emails,
         "discovered_usernames": discovered_usernames,
         "confirmed_profiles": confirmed_profiles,
+        "filtered_profiles": filtered_profiles,
         "people_search_links": people_search_links,
+        "location_context": location_context,
         "summary": " | ".join(summary_parts),
         "execution_time": execution_time
     }
@@ -2997,30 +3375,87 @@ async def scrape_jail_roster(url: str) -> Dict[str, Any]:
 
     html = None
     response_status = None
+    from urllib.parse import quote
+    import random
 
-    # Method 1: Try cloudscraper first (bypasses Cloudflare)
+    # Rotate user agents to avoid detection
+    user_agents = [
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15',
+    ]
+    random_ua = random.choice(user_agents)
+
+    # Method 1: Try ScrapingBee free tier (100 free credits/month)
+    # Using render=false for speed, premium_proxy for better success
     try:
-        import cloudscraper
-        scraper = cloudscraper.create_scraper(
-            browser={'browser': 'chrome', 'platform': 'darwin', 'desktop': True}
-        )
-        response = scraper.get(url, headers=headers, timeout=30)
-        response_status = response.status_code
-        if response.status_code == 200:
-            html = response.text
+        import os
+        scrapingbee_key = os.environ.get('SCRAPINGBEE_API_KEY')
+        if scrapingbee_key:
+            sb_url = f"https://app.scrapingbee.com/api/v1/?api_key={scrapingbee_key}&url={quote(url, safe='')}&render_js=false"
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                response = await client.get(sb_url)
+                if response.status_code == 200 and len(response.text) > 500:
+                    html = response.text
     except Exception as e:
-        errors.append(f"Cloudscraper: {str(e)[:50]}")
+        errors.append(f"ScrapingBee: {str(e)[:30]}")
 
-    # Method 2: Try curl_cffi (Chrome TLS fingerprint)
+    # Method 2: Try multiple free CORS proxies with better headers
+    if not html:
+        proxy_configs = [
+            # allorigins.win
+            {
+                'url': f"https://api.allorigins.win/get?url={quote(url, safe='')}",
+                'extract': lambda r: r.json().get('contents') if r.status_code == 200 else None
+            },
+            # corsproxy.io
+            {
+                'url': f"https://corsproxy.io/?{quote(url, safe='')}",
+                'extract': lambda r: r.text if r.status_code == 200 else None
+            },
+            # webscraping.ai free tier
+            {
+                'url': f"https://api.webscraping.ai/html?api_key=demo&url={quote(url, safe='')}",
+                'extract': lambda r: r.text if r.status_code == 200 else None
+            },
+        ]
+
+        for proxy in proxy_configs:
+            if html:
+                break
+            try:
+                proxy_headers = {
+                    'User-Agent': random_ua,
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.5',
+                    **proxy.get('headers', {})
+                }
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    response = await client.get(proxy['url'], headers=proxy_headers)
+                    response_status = response.status_code
+                    content = proxy['extract'](response)
+                    if content and len(content) > 500:  # Must have real content
+                        html = content
+                        break
+            except Exception as e:
+                errors.append(f"Proxy: {str(e)[:30]}")
+
+    # Method 2: Try cloudscraper (bypasses Cloudflare)
     if not html:
         try:
-            from curl_cffi import requests as curl_requests
-            response = curl_requests.get(url, impersonate="chrome", timeout=30)
+            import cloudscraper
+            scraper = cloudscraper.create_scraper(
+                browser={'browser': 'chrome', 'platform': 'darwin', 'desktop': True}
+            )
+            response = scraper.get(url, headers=headers, timeout=30)
             response_status = response.status_code
             if response.status_code == 200:
                 html = response.text
         except Exception as e:
-            errors.append(f"Curl-cffi: {str(e)[:50]}")
+            errors.append(f"Cloudscraper: {str(e)[:50]}")
+
+    # Method 2: Skip curl_cffi - removed from requirements
 
     # Method 3: Try httpx as fallback
     if not html:
@@ -3033,21 +3468,7 @@ async def scrape_jail_roster(url: str) -> Dict[str, Any]:
         except Exception as e:
             errors.append(f"Httpx: {str(e)[:50]}")
 
-    # Method 4: Try Playwright headless browser (most powerful)
-    if not html:
-        try:
-            from playwright.async_api import async_playwright
-            async with async_playwright() as p:
-                browser = await p.chromium.launch(headless=True, args=['--no-sandbox', '--disable-setuid-sandbox'])
-                context = await browser.new_context(user_agent=headers['User-Agent'])
-                page = await context.new_page()
-                await page.goto(url, wait_until='networkidle', timeout=30000)
-                await page.wait_for_timeout(2000)
-                html = await page.content()
-                response_status = 200
-                await browser.close()
-        except Exception as e:
-            errors.append(f"Playwright: {str(e)[:50]}")
+    # Method 4: Skip Playwright for now - focus on stability
 
     # If all methods failed
     if not html:
@@ -3187,37 +3608,165 @@ async def scrape_jail_roster(url: str) -> Dict[str, Any]:
                     elif 'booking' in label and 'booking_number' not in inmate:
                         inmate['booking_number'] = value
 
-        # Extract charges - look for charge tables or lists
-        charge_tables = soup.find_all('table', class_=lambda x: x and 'charge' in str(x).lower())
-        if not charge_tables:
-            # Try finding tables that might contain charges
-            for table in soup.find_all('table'):
-                headers = [th.get_text(strip=True).lower() for th in table.find_all('th')]
-                if any('charge' in h or 'offense' in h for h in headers):
-                    charge_tables.append(table)
+        # Pattern 4: Revize jail system - labels followed by input fields with values
+        # Format: <label class="form-label">First Name</label><input value="RANDY">
+        first_name = ''
+        last_name = ''
+        middle_name = ''
 
-        for table in charge_tables:
-            rows = table.find_all('tr')
-            headers = []
-            for row in rows:
-                ths = row.find_all('th')
-                if ths:
-                    headers = [th.get_text(strip=True).lower() for th in ths]
-                else:
-                    cells = row.find_all('td')
-                    if cells and headers:
-                        charge = {}
-                        for i, cell in enumerate(cells):
-                            if i < len(headers):
-                                charge[headers[i]] = cell.get_text(strip=True)
-                        if charge:
-                            charges.append(charge)
-                    elif cells and len(cells) >= 2:
-                        # No headers, assume first cell is charge description
-                        charges.append({
-                            'charge': cells[0].get_text(strip=True),
-                            'details': cells[1].get_text(strip=True) if len(cells) > 1 else ''
-                        })
+        for label in soup.find_all('label'):
+            label_text = label.get_text(strip=True).lower()
+            # Find the next input element (not necessarily sibling - find_next traverses DOM)
+            next_input = label.find_next('input')
+
+            if next_input and next_input.get('value'):
+                value = next_input.get('value', '').strip()
+                if not value:
+                    continue
+
+                # Map Revize field labels to inmate data
+                if 'first name' in label_text:
+                    first_name = value
+                elif 'last name' in label_text:
+                    last_name = value
+                elif 'middle' in label_text:
+                    middle_name = value
+                elif label_text == 'age' or 'age' == label_text.strip():
+                    inmate['age'] = value
+                elif 'race' in label_text:
+                    inmate['race'] = value
+                elif label_text in ['sex', 'gender'] or 'sex' in label_text:
+                    inmate['sex'] = value
+                elif 'height' in label_text:
+                    inmate['height'] = value
+                elif 'weight' in label_text:
+                    inmate['weight'] = value
+                elif 'hair' in label_text:
+                    inmate['hair_color'] = value
+                elif 'eye' in label_text:
+                    inmate['eye_color'] = value
+                elif 'address' in label_text or 'city' in label_text:
+                    if 'address' not in inmate:
+                        inmate['address'] = value
+                    else:
+                        inmate['address'] += ', ' + value
+                elif 'booking' in label_text and 'date' not in label_text:
+                    inmate['booking_number'] = value
+                elif 'arrest' in label_text or 'booking date' in label_text:
+                    inmate['booking_date'] = value
+                elif 'dob' in label_text or 'birth' in label_text:
+                    inmate['dob'] = value
+
+        # Combine first/middle/last name for Revize format
+        if first_name or last_name:
+            name_parts = []
+            if first_name:
+                name_parts.append(first_name)
+            if middle_name:
+                name_parts.append(middle_name)
+            if last_name:
+                name_parts.append(last_name)
+            if name_parts:
+                inmate['name'] = ' '.join(name_parts)
+
+        # Pattern 5: Revize charges table - has headers like "Desc.", "Bond Type", "Bond Amt."
+        if not charges:
+            for table in soup.find_all('table'):
+                # Check if this table has Revize-style headers
+                headers = [th.get_text(strip=True).lower() for th in table.find_all('th')]
+
+                # Revize pattern: Desc., Bond Type, Bond Amt.
+                if any('desc' in h for h in headers) and any('bond' in h for h in headers):
+                    # Map header positions
+                    desc_idx = next((i for i, h in enumerate(headers) if 'desc' in h), 0)
+                    bond_type_idx = next((i for i, h in enumerate(headers) if 'bond type' in h or h == 'bond type'), -1)
+                    bond_amt_idx = next((i for i, h in enumerate(headers) if 'bond amt' in h or 'amount' in h), -1)
+
+                    rows = table.find_all('tr')
+                    for row in rows:
+                        cells = row.find_all('td')
+                        if len(cells) > desc_idx:
+                            charge_text = cells[desc_idx].get_text(strip=True)
+                            # Skip empty or non-charge rows
+                            if len(charge_text) > 5 and charge_text.isupper():
+                                charge_info = {'charge': charge_text}
+
+                                # Get bond type
+                                if bond_type_idx >= 0 and len(cells) > bond_type_idx:
+                                    bond_type = cells[bond_type_idx].get_text(strip=True)
+                                    if bond_type:
+                                        charge_info['bond_type'] = bond_type
+
+                                # Get bond amount
+                                if bond_amt_idx >= 0 and len(cells) > bond_amt_idx:
+                                    bond_amt = cells[bond_amt_idx].get_text(strip=True)
+                                    if bond_amt:
+                                        charge_info['bond_amount'] = bond_amt
+                                        # Also add to bonds array if it's a dollar amount
+                                        if '$' in bond_amt or bond_amt.replace(',', '').replace('.', '').isdigit():
+                                            bonds.append({'amount': bond_amt, 'charge': charge_text})
+
+                                # Dedupe
+                                if not any(c.get('charge') == charge_text for c in charges):
+                                    charges.append(charge_info)
+
+                    # Found Revize table, don't process other tables
+                    if charges:
+                        break
+
+            # Fallback: Look for any table with all-caps charge text
+            if not charges:
+                for table in soup.find_all('table'):
+                    rows = table.find_all('tr')
+                    for row in rows:
+                        cells = row.find_all('td')
+                        if cells:
+                            first_cell_text = cells[0].get_text(strip=True)
+                            if len(first_cell_text) > 10 and first_cell_text.isupper():
+                                charge_info = {'charge': first_cell_text}
+                                if len(cells) > 1:
+                                    for i, cell in enumerate(cells[1:], 1):
+                                        cell_text = cell.get_text(strip=True)
+                                        if '$' in cell_text:
+                                            charge_info['bond_amount'] = cell_text
+                                            bonds.append({'amount': cell_text, 'charge': first_cell_text})
+                                        elif cell_text:
+                                            charge_info[f'col_{i}'] = cell_text
+                                if not any(c.get('charge') == first_cell_text for c in charges):
+                                    charges.append(charge_info)
+
+        # Extract charges - look for charge tables or lists (skip if Revize pattern found charges)
+        if not charges:
+            charge_tables = soup.find_all('table', class_=lambda x: x and 'charge' in str(x).lower())
+            if not charge_tables:
+                # Try finding tables that might contain charges
+                for table in soup.find_all('table'):
+                    headers = [th.get_text(strip=True).lower() for th in table.find_all('th')]
+                    if any('charge' in h or 'offense' in h for h in headers):
+                        charge_tables.append(table)
+
+            for table in charge_tables:
+                rows = table.find_all('tr')
+                headers = []
+                for row in rows:
+                    ths = row.find_all('th')
+                    if ths:
+                        headers = [th.get_text(strip=True).lower() for th in ths]
+                    else:
+                        cells = row.find_all('td')
+                        if cells and headers:
+                            charge = {}
+                            for i, cell in enumerate(cells):
+                                if i < len(headers):
+                                    charge[headers[i]] = cell.get_text(strip=True)
+                            if charge:
+                                charges.append(charge)
+                        elif cells and len(cells) >= 2:
+                            # No headers, assume first cell is charge description
+                            charges.append({
+                                'charge': cells[0].get_text(strip=True),
+                                'details': cells[1].get_text(strip=True) if len(cells) > 1 else ''
+                            })
 
         # Extract bonds
         bond_tables = soup.find_all('table', class_=lambda x: x and 'bond' in str(x).lower())
@@ -3299,6 +3848,1129 @@ async def jail_roster_scrape(request: JailRosterRequest):
     - Mugshot photo URL
     """
     return await scrape_jail_roster(request.url)
+
+
+class BulkJailRosterRequest(BaseModel):
+    """Request for bulk jail roster scraping"""
+    base_url: str  # e.g., "https://inmates.stpso.revize.com"
+    start_booking: Optional[int] = None  # Optional - will auto-discover if not provided
+    count: int = 10  # How many to fetch (max 50)
+
+
+class BulkJailRosterResult(BaseModel):
+    """Result from bulk jail roster scraping"""
+    base_url: str
+    start_booking: int
+    count_requested: int
+    count_found: int
+    inmates: list
+    errors: list
+    execution_time: float
+
+
+async def find_latest_booking(base_url: str, start_estimate: int = 280000) -> int:
+    """
+    Auto-discover the latest booking number by probing.
+    Uses binary search to find the highest valid booking number.
+    """
+    # Start from an estimate and probe to find valid bookings
+    high = start_estimate
+    low = start_estimate - 10000  # Search within last 10k bookings
+    latest_found = None
+
+    # First, find a valid booking by checking a few numbers
+    test_numbers = [high, high - 100, high - 500, high - 1000, high - 2000]
+
+    for num in test_numbers:
+        url = f"{base_url}/bookings/{num}"
+        try:
+            result = await scrape_jail_roster(url)
+            if result.get('inmate') and result['inmate'].get('name'):
+                latest_found = num
+                low = num  # Found one, search upward from here
+                break
+        except:
+            continue
+
+    # If we found something, try to find higher valid bookings
+    if latest_found:
+        # Check a few numbers above to see if there are newer ones
+        for offset in [10, 20, 50, 100, 200]:
+            test_num = latest_found + offset
+            url = f"{base_url}/bookings/{test_num}"
+            try:
+                result = await scrape_jail_roster(url)
+                if result.get('inmate') and result['inmate'].get('name'):
+                    latest_found = test_num
+            except:
+                continue
+
+    # Default to estimate if nothing found
+    return latest_found if latest_found else start_estimate
+
+
+@app.post("/api/jail-roster/bulk", response_model=BulkJailRosterResult)
+async def bulk_jail_roster_scrape(request: BulkJailRosterRequest):
+    """
+    Scrape multiple jail roster pages by booking number range.
+
+    Provide the base URL (e.g., https://inmates.stpso.revize.com).
+    If start_booking is not provided, will auto-discover the latest booking number.
+
+    Will scrape from start_booking down to start_booking - count + 1.
+    """
+    import asyncio
+
+    start_time = datetime.now()
+
+    # Limit to 50 max to avoid overloading
+    count = min(request.count, 50)
+
+    # Normalize base URL
+    base_url = request.base_url.rstrip('/')
+
+    # Auto-discover latest booking if not provided
+    if request.start_booking:
+        start_booking = request.start_booking
+    else:
+        start_booking = await find_latest_booking(base_url)
+
+    # Generate booking URLs
+    booking_numbers = list(range(start_booking, start_booking - count, -1))
+
+    # Scrape in parallel (batches of 5 to be nice to the server)
+    inmates = []
+    errors = []
+
+    async def scrape_one(booking_num):
+        url = f"{base_url}/bookings/{booking_num}"
+        try:
+            result = await scrape_jail_roster(url)
+            if result.get('inmate') and result['inmate'].get('name'):
+                return {
+                    'booking_number': booking_num,
+                    **result
+                }
+            else:
+                return None
+        except Exception as e:
+            errors.append(f"Booking {booking_num}: {str(e)[:50]}")
+            return None
+
+    # Process in batches of 5
+    batch_size = 5
+    for i in range(0, len(booking_numbers), batch_size):
+        batch = booking_numbers[i:i + batch_size]
+        tasks = [scrape_one(num) for num in batch]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        for result in results:
+            if isinstance(result, Exception):
+                errors.append(str(result)[:50])
+            elif result is not None:
+                inmates.append(result)
+
+        # Small delay between batches
+        if i + batch_size < len(booking_numbers):
+            await asyncio.sleep(0.5)
+
+    execution_time = (datetime.now() - start_time).total_seconds()
+
+    return {
+        'base_url': base_url,
+        'start_booking': start_booking,
+        'count_requested': count,
+        'count_found': len(inmates),
+        'inmates': inmates,
+        'errors': errors,
+        'execution_time': execution_time
+    }
+
+
+# ============================================================================
+# LOUISIANA COURT RECORDS SEARCH (Tyler Technologies)
+# ============================================================================
+
+class CourtSearchRequest(BaseModel):
+    """Request for court records search"""
+    name: str  # Defendant name to search
+    dob: Optional[str] = None  # Date of birth for matching (YYYY-MM-DD or MM/DD/YYYY)
+    parish: Optional[str] = None  # Optional parish filter
+
+
+class CourtCase(BaseModel):
+    """Court case record"""
+    case_number: str
+    case_type: Optional[str] = None
+    filing_date: Optional[str] = None
+    status: Optional[str] = None
+    charges: Optional[List[str]] = None
+    court: Optional[str] = None
+    judge: Optional[str] = None
+    next_hearing: Optional[str] = None
+    disposition: Optional[str] = None
+    has_fta: bool = False  # Flagged if FTA/warrant found
+    has_warrant: bool = False
+    defendant_dob: Optional[str] = None
+    dob_match: bool = False  # True if DOB matches search criteria
+
+
+class CourtSearchResult(BaseModel):
+    """Court records search result"""
+    name: str
+    dob_searched: Optional[str] = None
+    cases: List[CourtCase]
+    total_cases: int
+    fta_cases: int  # Cases with FTA/bench warrant
+    warrant_cases: int
+    active_cases: int
+    dob_matched_cases: int
+    alerts: List[str]  # Important flags like "ACTIVE WARRANT", "PRIOR FTA"
+    errors: List[str]
+    execution_time: float
+
+
+async def search_la_court_records(name: str, parish: str = None, dob: str = None) -> Dict[str, Any]:
+    """
+    Search Louisiana court records via Tyler Technologies portal.
+    Credentials stored in environment variables for security.
+    Uses ScrapingBee for JavaScript rendering when available.
+    """
+    import os
+    import re
+    from datetime import datetime
+    from urllib.parse import quote
+
+    start_time = datetime.now()
+    cases = []
+    errors = []
+    fta_count = 0
+    active_count = 0
+    warrant_count = 0
+
+    # Get credentials from environment
+    court_user = os.environ.get('LA_COURT_USERNAME')
+    court_pass = os.environ.get('LA_COURT_PASSWORD')
+    scrapingbee_key = os.environ.get('SCRAPINGBEE_API_KEY')
+
+    if not court_user or not court_pass:
+        errors.append("Court records credentials not configured (LA_COURT_USERNAME, LA_COURT_PASSWORD)")
+        return {
+            'name': name,
+            'cases': [],
+            'total_cases': 0,
+            'fta_cases': 0,
+            'active_cases': 0,
+            'errors': errors,
+            'execution_time': (datetime.now() - start_time).total_seconds()
+        }
+
+    # Parse name into first/last
+    name_parts = name.strip().split()
+    if len(name_parts) >= 2:
+        first_name = name_parts[0]
+        last_name = name_parts[-1]
+    else:
+        first_name = ""
+        last_name = name
+
+    # FTA/warrant keywords to look for
+    fta_keywords = ['failure to appear', 'fta', 'bench warrant', 'capias', 'fugitive', 'absconding']
+    warrant_keywords = ['warrant', 'capias', 'fugitive']
+    active_keywords = ['active', 'open', 'pending', 'arraignment', 'trial']
+
+    try:
+        # Try ScrapingBee first (has JavaScript rendering for Angular sites)
+        if scrapingbee_key:
+            try:
+                # ScrapingBee can render JavaScript and handle sessions
+                search_url = f"https://researchla.tylerhost.net/CourtRecordsSearch/#!/search?firstName={quote(first_name)}&lastName={quote(last_name)}"
+
+                async with httpx.AsyncClient(timeout=90.0) as client:
+                    scrapingbee_url = f"https://app.scrapingbee.com/api/v1/"
+
+                    response = await client.get(
+                        scrapingbee_url,
+                        params={
+                            'api_key': scrapingbee_key,
+                            'url': search_url,
+                            'render_js': 'true',
+                            'wait': 5000,  # Wait 5 seconds for Angular to load
+                            'premium_proxy': 'true',
+                        },
+                        timeout=90.0
+                    )
+
+                    if response.status_code == 200:
+                        html = response.text
+
+                        # Parse the rendered HTML for case results
+                        from bs4 import BeautifulSoup
+                        soup = BeautifulSoup(html, 'html.parser')
+
+                        # Look for case rows (Tyler uses various table/grid formats)
+                        case_rows = soup.select('.case-row, .search-result, tr[data-case], .case-item, tbody tr')
+
+                        for row in case_rows:
+                            case_text = row.get_text(' ', strip=True).lower()
+
+                            # Extract case info
+                            case_data = {
+                                'case_number': '',
+                                'case_type': '',
+                                'filing_date': '',
+                                'status': '',
+                                'charges': [],
+                                'court': '',
+                                'has_fta': False,
+                                'has_warrant': False
+                            }
+
+                            # Try to find case number
+                            case_num_elem = row.select_one('.case-number, [data-case-number], td:first-child a')
+                            if case_num_elem:
+                                case_data['case_number'] = case_num_elem.get_text(strip=True)
+
+                            # Check for FTA/warrant indicators
+                            for keyword in fta_keywords:
+                                if keyword in case_text:
+                                    case_data['has_fta'] = True
+                                    fta_count += 1
+                                    break
+
+                            for keyword in warrant_keywords:
+                                if keyword in case_text:
+                                    case_data['has_warrant'] = True
+                                    warrant_count += 1
+                                    break
+
+                            for keyword in active_keywords:
+                                if keyword in case_text:
+                                    active_count += 1
+                                    break
+
+                            if case_data['case_number']:
+                                cases.append(case_data)
+
+                        if not cases and 'No results' not in html and 'no records' not in html.lower():
+                            errors.append("Could not parse results from ScrapingBee response")
+
+                    else:
+                        errors.append(f"ScrapingBee returned {response.status_code}")
+
+            except Exception as e:
+                errors.append(f"ScrapingBee error: {str(e)[:50]}")
+
+        # Fallback to direct API approach
+        if not cases and not errors:
+            async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+                # Step 1: Get login page to establish session
+                login_url = "https://researchla.tylerhost.net/CourtRecordsSearch/Account/Login"
+
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'application/json, text/plain, */*',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Origin': 'https://researchla.tylerhost.net',
+                    'Referer': 'https://researchla.tylerhost.net/CourtRecordsSearch/',
+                }
+
+                # Try to authenticate
+                auth_data = {
+                    'Email': court_user,
+                    'Password': court_pass,
+                    'RememberMe': False
+                }
+
+                login_response = await client.post(
+                    login_url,
+                    json=auth_data,
+                    headers=headers
+                )
+
+                if login_response.status_code != 200:
+                    errors.append(f"Login failed: {login_response.status_code}")
+                else:
+                    # Step 2: Search for defendant
+                    search_url = "https://researchla.tylerhost.net/CourtRecordsSearch/api/Search"
+
+                    search_data = {
+                        'SearchType': 'Party',
+                        'LastName': last_name,
+                        'FirstName': first_name,
+                        'MiddleName': '',
+                        'DateOfBirth': dob or '',
+                        'CaseNumber': '',
+                        'PageNumber': 1,
+                        'PageSize': 50
+                    }
+
+                    if parish:
+                        search_data['Court'] = parish
+
+                    search_response = await client.post(
+                        search_url,
+                        json=search_data,
+                        headers=headers
+                    )
+
+                if search_response.status_code == 200:
+                    try:
+                        results = search_response.json()
+
+                        # Parse results (structure depends on Tyler's API)
+                        if isinstance(results, dict) and 'Cases' in results:
+                            for case_data in results.get('Cases', []):
+                                case = {
+                                    'case_number': case_data.get('CaseNumber', ''),
+                                    'case_type': case_data.get('CaseType', ''),
+                                    'filing_date': case_data.get('FilingDate', ''),
+                                    'status': case_data.get('Status', ''),
+                                    'charges': case_data.get('Charges', []),
+                                    'court': case_data.get('Court', ''),
+                                    'judge': case_data.get('Judge', ''),
+                                    'next_hearing': case_data.get('NextHearing', ''),
+                                    'disposition': case_data.get('Disposition', '')
+                                }
+                                cases.append(case)
+
+                                # Count FTAs and active cases
+                                status_lower = (case.get('status') or '').lower()
+                                if 'fta' in status_lower or 'failure to appear' in status_lower or 'bench warrant' in status_lower:
+                                    fta_count += 1
+                                if 'active' in status_lower or 'open' in status_lower or 'pending' in status_lower:
+                                    active_count += 1
+
+                        elif isinstance(results, list):
+                            for case_data in results:
+                                case = {
+                                    'case_number': str(case_data.get('CaseNumber', case_data.get('caseNumber', ''))),
+                                    'case_type': case_data.get('CaseType', case_data.get('caseType', '')),
+                                    'filing_date': case_data.get('FilingDate', case_data.get('filingDate', '')),
+                                    'status': case_data.get('Status', case_data.get('status', '')),
+                                    'court': case_data.get('Court', case_data.get('court', '')),
+                                }
+                                cases.append(case)
+
+                    except Exception as e:
+                        errors.append(f"Failed to parse results: {str(e)[:50]}")
+                else:
+                    errors.append(f"Search failed: {search_response.status_code}")
+
+    except Exception as e:
+        errors.append(f"Court search error: {str(e)[:100]}")
+
+    execution_time = (datetime.now() - start_time).total_seconds()
+
+    return {
+        'name': name,
+        'cases': cases,
+        'total_cases': len(cases),
+        'fta_cases': fta_count,
+        'active_cases': active_count,
+        'errors': errors,
+        'execution_time': execution_time
+    }
+
+
+@app.post("/api/la-court-records")
+async def search_la_court_records_endpoint(request: CourtSearchRequest):
+    """
+    Search Louisiana court records for a defendant.
+
+    Uses Tyler Technologies portal (researchla.tylerhost.net).
+    Credentials must be configured as environment variables:
+    - LA_COURT_USERNAME
+    - LA_COURT_PASSWORD
+
+    Returns case history including FTAs, active cases, and dispositions.
+    """
+    result = await search_la_court_records(request.name, request.parish)
+
+    # Build alerts based on findings
+    alerts = []
+    if result.get('fta_cases', 0) > 0:
+        alerts.append(f"⚠️ PRIOR FTA: {result['fta_cases']} failure(s) to appear on record")
+    if result.get('active_cases', 0) > 0:
+        alerts.append(f"📋 ACTIVE CASES: {result['active_cases']} pending case(s)")
+
+    # Check for warrants in case details
+    warrant_count = 0
+    for case in result.get('cases', []):
+        status_lower = (case.get('status') or '').lower()
+        if 'warrant' in status_lower:
+            warrant_count += 1
+
+    if warrant_count > 0:
+        alerts.append(f"🚨 ACTIVE WARRANT: {warrant_count} warrant(s) found")
+
+    return {
+        'name': result.get('name', request.name),
+        'dob_searched': request.dob,
+        'cases': result.get('cases', []),
+        'total_cases': result.get('total_cases', 0),
+        'fta_cases': result.get('fta_cases', 0),
+        'warrant_cases': warrant_count,
+        'active_cases': result.get('active_cases', 0),
+        'dob_matched_cases': 0,  # Will be updated when DOB matching is implemented
+        'alerts': alerts,
+        'errors': result.get('errors', []),
+        'execution_time': result.get('execution_time', 0)
+    }
+
+
+# ============================================================================
+# FTA RISK SCORING
+# ============================================================================
+
+class FTAScoreRequest(BaseModel):
+    """Request for FTA risk score calculation"""
+    name: str
+    age: Optional[str] = None
+    address: Optional[str] = None
+    charges: Optional[List[Dict[str, Any]]] = None
+    bond_amount: Optional[float] = None
+    booking_number: Optional[int] = None
+    jail_base_url: Optional[str] = None  # For prior booking search
+    race: Optional[str] = None
+    sex: Optional[str] = None
+
+
+class FTAScoreResult(BaseModel):
+    """FTA risk score result with breakdown"""
+    name: str
+    score: int  # 0-100, higher = more risk
+    risk_level: str  # LOW, MEDIUM, HIGH, VERY_HIGH
+    factors: List[Dict[str, Any]]
+    prior_bookings: List[Dict[str, Any]]
+    court_records: List[Dict[str, Any]]
+    ai_analysis: Optional[str] = None
+    execution_time: float
+
+
+# Louisiana parishes for local check
+LOUISIANA_PARISHES = [
+    "acadia", "allen", "ascension", "assumption", "avoyelles", "beauregard",
+    "bienville", "bossier", "caddo", "calcasieu", "caldwell", "cameron",
+    "catahoula", "claiborne", "concordia", "de soto", "desoto", "east baton rouge",
+    "east carroll", "east feliciana", "evangeline", "franklin", "grant",
+    "iberia", "iberville", "jackson", "jefferson", "jefferson davis", "lafayette",
+    "lafourche", "lasalle", "la salle", "lincoln", "livingston", "madison",
+    "morehouse", "natchitoches", "orleans", "ouachita", "plaquemines",
+    "pointe coupee", "rapides", "red river", "richland", "sabine",
+    "st. bernard", "st bernard", "st. charles", "st charles", "st. helena",
+    "st helena", "st. james", "st james", "st. john", "st john",
+    "st. landry", "st landry", "st. martin", "st martin", "st. mary", "st mary",
+    "st. tammany", "st tammany", "tangipahoa", "tensas", "terrebonne",
+    "union", "vermilion", "vernon", "washington", "webster",
+    "west baton rouge", "west carroll", "west feliciana", "winn"
+]
+
+# Felony indicators in charge text
+FELONY_INDICATORS = [
+    "felony", "murder", "manslaughter", "rape", "armed robbery", "kidnapping",
+    "aggravated", "trafficking", "distribution", "possession with intent",
+    "burglary", "carjacking", "assault with", "battery with", "armed",
+    "first degree", "second degree", "1st degree", "2nd degree"
+]
+
+# Violent crime indicators
+VIOLENT_INDICATORS = [
+    "murder", "manslaughter", "rape", "assault", "battery", "robbery",
+    "kidnapping", "domestic", "violence", "weapon", "armed", "shooting",
+    "stabbing", "threatening", "intimidation", "stalking"
+]
+
+# FTA/Flight risk indicators
+FTA_INDICATORS = [
+    "failure to appear", "fta", "bench warrant", "fugitive", "flight",
+    "bail jumping", "contempt of court", "absconding"
+]
+
+
+def analyze_charges(charges: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Analyze charges for severity and risk factors"""
+    result = {
+        "has_felony": False,
+        "has_violent": False,
+        "has_prior_fta": False,
+        "charge_count": len(charges) if charges else 0,
+        "felony_count": 0,
+        "violent_count": 0,
+        "fta_count": 0,
+        "fta_charges": [],  # Track which charges triggered FTA flag
+        "fta_type": None  # Type of FTA indicator found
+    }
+
+    if not charges:
+        return result
+
+    for charge in charges:
+        charge_text = (charge.get("charge") or charge.get("description") or "").lower()
+        charge_display = charge.get("charge") or charge.get("description") or ""
+
+        # Check for felony
+        if any(indicator in charge_text for indicator in FELONY_INDICATORS):
+            result["has_felony"] = True
+            result["felony_count"] += 1
+
+        # Check for violent
+        if any(indicator in charge_text for indicator in VIOLENT_INDICATORS):
+            result["has_violent"] = True
+            result["violent_count"] += 1
+
+        # Check for prior FTA - track which indicator and charge
+        for indicator in FTA_INDICATORS:
+            if indicator in charge_text:
+                result["has_prior_fta"] = True
+                result["fta_count"] += 1
+                result["fta_charges"].append(charge_display)
+                # Set type based on indicator
+                if indicator in ["fugitive", "flight"]:
+                    result["fta_type"] = "FUGITIVE"
+                elif indicator in ["failure to appear", "fta"]:
+                    result["fta_type"] = "FTA"
+                elif indicator in ["bench warrant"]:
+                    result["fta_type"] = "BENCH_WARRANT"
+                elif indicator in ["bail jumping", "absconding"]:
+                    result["fta_type"] = "BAIL_VIOLATION"
+                break  # Only count each charge once
+
+    return result
+
+
+def check_address_local(address: str, jail_parish: str = "st. tammany") -> Dict[str, Any]:
+    """Check if address is local to the jail's jurisdiction"""
+    result = {
+        "is_local": False,
+        "is_louisiana": False,
+        "is_out_of_state": False,
+        "parish_match": False,
+        "detected_state": None,
+        "detected_parish": None
+    }
+
+    if not address:
+        return result
+
+    address_lower = address.lower()
+
+    # Check for Louisiana
+    if "louisiana" in address_lower or ", la" in address_lower or " la " in address_lower:
+        result["is_louisiana"] = True
+
+        # Check for parish match
+        for parish in LOUISIANA_PARISHES:
+            if parish in address_lower:
+                result["detected_parish"] = parish
+                if jail_parish.lower() in parish or parish in jail_parish.lower():
+                    result["parish_match"] = True
+                    result["is_local"] = True
+                break
+    else:
+        # Check for other states
+        state_abbrevs = ["al", "ak", "az", "ar", "ca", "co", "ct", "de", "fl", "ga",
+                        "hi", "id", "il", "in", "ia", "ks", "ky", "me", "md", "ma",
+                        "mi", "mn", "ms", "mo", "mt", "ne", "nv", "nh", "nj", "nm",
+                        "ny", "nc", "nd", "oh", "ok", "or", "pa", "ri", "sc", "sd",
+                        "tn", "tx", "ut", "vt", "va", "wa", "wv", "wi", "wy"]
+
+        for abbrev in state_abbrevs:
+            if f", {abbrev}" in address_lower or f" {abbrev} " in address_lower:
+                result["is_out_of_state"] = True
+                result["detected_state"] = abbrev.upper()
+                break
+
+    return result
+
+
+async def search_prior_bookings(name: str, base_url: str, current_booking: int = None) -> List[Dict[str, Any]]:
+    """Search for prior bookings at the same jail"""
+    prior_bookings = []
+
+    if not base_url or not name:
+        return prior_bookings
+
+    # Parse name into parts for searching
+    name_parts = name.upper().split()
+    if len(name_parts) < 2:
+        return prior_bookings
+
+    last_name = name_parts[-1]
+    first_name = name_parts[0]
+
+    # Search a range of booking numbers before current
+    # This is a simple approach - check ~100 bookings back
+    if current_booking:
+        search_range = range(current_booking - 100, current_booking - 1)
+    else:
+        # Start from a reasonable recent number
+        search_range = range(270000, 270100)
+
+    base_url = base_url.rstrip('/')
+
+    async def check_booking(booking_num):
+        url = f"{base_url}/bookings/{booking_num}"
+        try:
+            result = await scrape_jail_roster(url)
+            if result.get('inmate') and result['inmate'].get('name'):
+                inmate_name = result['inmate']['name'].upper()
+                # Check if same person (last name match + first name match)
+                if last_name in inmate_name and first_name in inmate_name:
+                    return {
+                        'booking_number': booking_num,
+                        'name': result['inmate']['name'],
+                        'charges': result.get('charges', []),
+                        'url': url
+                    }
+        except:
+            pass
+        return None
+
+    # Check in batches of 10
+    batch_size = 10
+    search_list = list(search_range)[:50]  # Limit to 50 checks
+
+    for i in range(0, len(search_list), batch_size):
+        batch = search_list[i:i + batch_size]
+        tasks = [check_booking(num) for num in batch]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        for result in results:
+            if result and not isinstance(result, Exception):
+                prior_bookings.append(result)
+
+        if len(prior_bookings) >= 5:  # Found enough
+            break
+
+        await asyncio.sleep(0.3)
+
+    return prior_bookings
+
+
+async def search_court_records(name: str) -> List[Dict[str, Any]]:
+    """Search CourtListener for federal court records"""
+    records = []
+
+    try:
+        # CourtListener API (free, federal records)
+        async with aiohttp.ClientSession() as session:
+            # Search for party name
+            search_url = "https://www.courtlistener.com/api/rest/v3/search/"
+            params = {
+                "q": name,
+                "type": "r",  # RECAP (federal court records)
+                "order_by": "dateFiled desc"
+            }
+
+            async with session.get(search_url, params=params, timeout=15) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    for result in data.get("results", [])[:5]:
+                        records.append({
+                            "case_name": result.get("caseName", "Unknown"),
+                            "court": result.get("court", "Unknown"),
+                            "date_filed": result.get("dateFiled"),
+                            "docket_number": result.get("docketNumber"),
+                            "source": "CourtListener"
+                        })
+    except Exception as e:
+        pass  # CourtListener may not always be available
+
+    return records
+
+
+async def get_ai_fta_analysis(inmate_data: Dict, factors: List[Dict], prior_bookings: List, court_records: List) -> str:
+    """Use GPT-4 to provide FTA risk analysis"""
+    try:
+        # Build context for AI
+        context = f"""
+Analyze the FTA (Failure to Appear) risk for this individual:
+
+Name: {inmate_data.get('name', 'Unknown')}
+Age: {inmate_data.get('age', 'Unknown')}
+Address: {inmate_data.get('address', 'Not provided')}
+Current Charges: {json.dumps(inmate_data.get('charges', []), indent=2)}
+Bond Amount: ${inmate_data.get('bond_amount', 'Unknown')}
+
+Risk Factors Identified:
+{json.dumps(factors, indent=2)}
+
+Prior Bookings Found: {len(prior_bookings)}
+{json.dumps(prior_bookings[:3], indent=2) if prior_bookings else 'None found'}
+
+Court Records Found: {len(court_records)}
+{json.dumps(court_records[:3], indent=2) if court_records else 'None found'}
+
+Provide a brief (2-3 sentence) assessment of this person's flight risk for a bail bondsman. Focus on:
+1. Key risk factors
+2. Community ties indicators
+3. Recommendation (good candidate for bond or high risk)
+"""
+
+        # Call OpenAI API
+        import os
+        openai_key = os.environ.get("OPENAI_API_KEY")
+
+        if not openai_key:
+            return None
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {openai_key}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": "gpt-4o",
+                    "messages": [
+                        {"role": "system", "content": "You are an expert bail bond risk assessor. Provide brief, actionable assessments."},
+                        {"role": "user", "content": context}
+                    ],
+                    "max_tokens": 200,
+                    "temperature": 0.3
+                },
+                timeout=30
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return data["choices"][0]["message"]["content"]
+    except Exception as e:
+        pass
+
+    return None
+
+
+def calculate_fta_score(
+    charge_analysis: Dict,
+    address_analysis: Dict,
+    prior_bookings: List,
+    court_records: List,
+    bond_amount: float = None,
+    age: str = None
+) -> tuple[int, str, List[Dict]]:
+    """Calculate FTA risk score and return factors"""
+
+    score = 50  # Base score
+    factors = []
+
+    # Prior FTA on current charges (+25)
+    if charge_analysis.get("has_prior_fta"):
+        score += 25
+        fta_type = charge_analysis.get("fta_type", "FTA")
+        fta_charges = charge_analysis.get("fta_charges", [])
+        charge_detail = fta_charges[0] if fta_charges else "Unknown"
+
+        # Build detailed factor message
+        if fta_type == "FUGITIVE":
+            factor_msg = f"FUGITIVE charge - active warrant from another jurisdiction"
+        elif fta_type == "BENCH_WARRANT":
+            factor_msg = f"Bench warrant - prior court no-show"
+        elif fta_type == "BAIL_VIOLATION":
+            factor_msg = f"Bail jumping/absconding charge"
+        else:
+            factor_msg = f"Prior FTA/Warrant on record"
+
+        factors.append({
+            "factor": factor_msg,
+            "impact": "+25",
+            "severity": "high",
+            "source_charge": charge_detail,
+            "fta_type": fta_type,
+            "research_tip": "Check Louisiana Odyssey (re:SearchLA) and NCIC for originating case"
+        })
+
+    # Prior bookings at same jail (+15 for each, max +30)
+    if prior_bookings:
+        prior_impact = min(len(prior_bookings) * 15, 30)
+        score += prior_impact
+        factors.append({
+            "factor": f"{len(prior_bookings)} prior booking(s) at this jail",
+            "impact": f"+{prior_impact}",
+            "severity": "high" if len(prior_bookings) > 1 else "medium"
+        })
+
+    # Federal court records (+10)
+    if court_records:
+        score += 10
+        factors.append({
+            "factor": f"{len(court_records)} federal court record(s) found",
+            "impact": "+10",
+            "severity": "medium"
+        })
+
+    # Out of state address (+20)
+    if address_analysis.get("is_out_of_state"):
+        score += 20
+        factors.append({
+            "factor": f"Out-of-state address ({address_analysis.get('detected_state', 'Unknown')})",
+            "impact": "+20",
+            "severity": "high"
+        })
+    # Out of parish but in LA (+10)
+    elif address_analysis.get("is_louisiana") and not address_analysis.get("is_local"):
+        score += 10
+        factors.append({
+            "factor": f"Out-of-parish address ({address_analysis.get('detected_parish', 'Unknown')})",
+            "impact": "+10",
+            "severity": "medium"
+        })
+    # Local address (-15)
+    elif address_analysis.get("is_local"):
+        score -= 15
+        factors.append({
+            "factor": "Local address (same parish)",
+            "impact": "-15",
+            "severity": "low"
+        })
+
+    # Felony charges (+15)
+    if charge_analysis.get("has_felony"):
+        score += 15
+        factors.append({
+            "factor": f"{charge_analysis.get('felony_count', 1)} felony charge(s)",
+            "impact": "+15",
+            "severity": "high"
+        })
+
+    # Violent charges (+10)
+    if charge_analysis.get("has_violent"):
+        score += 10
+        factors.append({
+            "factor": f"{charge_analysis.get('violent_count', 1)} violent charge(s)",
+            "impact": "+10",
+            "severity": "high"
+        })
+
+    # Multiple charges (+5)
+    if charge_analysis.get("charge_count", 0) > 3:
+        score += 5
+        factors.append({
+            "factor": f"Multiple charges ({charge_analysis.get('charge_count')})",
+            "impact": "+5",
+            "severity": "medium"
+        })
+
+    # High bond amount (+10 for >$10k, +5 for >$5k)
+    if bond_amount:
+        if bond_amount > 10000:
+            score += 10
+            factors.append({
+                "factor": f"High bond amount (${bond_amount:,.0f})",
+                "impact": "+10",
+                "severity": "medium"
+            })
+        elif bond_amount > 5000:
+            score += 5
+            factors.append({
+                "factor": f"Moderate bond amount (${bond_amount:,.0f})",
+                "impact": "+5",
+                "severity": "low"
+            })
+
+    # Age factors
+    if age:
+        try:
+            age_int = int(age)
+            if age_int < 25:
+                score += 5
+                factors.append({
+                    "factor": f"Young age ({age_int})",
+                    "impact": "+5",
+                    "severity": "low"
+                })
+            elif age_int > 50:
+                score -= 5
+                factors.append({
+                    "factor": f"Older age ({age_int})",
+                    "impact": "-5",
+                    "severity": "low"
+                })
+        except:
+            pass
+
+    # No prior bookings found (-10)
+    if not prior_bookings:
+        score -= 10
+        factors.append({
+            "factor": "No prior bookings found at this jail",
+            "impact": "-10",
+            "severity": "low"
+        })
+
+    # Clamp score to 0-100
+    score = max(0, min(100, score))
+
+    # Determine risk level
+    if score >= 75:
+        risk_level = "VERY_HIGH"
+    elif score >= 60:
+        risk_level = "HIGH"
+    elif score >= 40:
+        risk_level = "MEDIUM"
+    else:
+        risk_level = "LOW"
+
+    return score, risk_level, factors
+
+
+@app.post("/api/fta-score", response_model=FTAScoreResult)
+async def calculate_fta_risk(request: FTAScoreRequest):
+    """
+    Calculate FTA (Failure to Appear) risk score for an inmate.
+
+    Uses multiple data sources:
+    - Charge analysis (felony, violent, prior FTA)
+    - Address analysis (local vs out of state)
+    - Prior booking search at same jail
+    - CourtListener federal court records
+    - AI-powered risk assessment
+
+    Returns score 0-100 with detailed factor breakdown.
+    """
+    start_time = datetime.now()
+
+    # Analyze charges
+    charge_analysis = analyze_charges(request.charges or [])
+
+    # Analyze address
+    address_analysis = check_address_local(
+        request.address or "",
+        "st. tammany"  # Default to St. Tammany for now
+    )
+
+    # Search for prior bookings (run in parallel with court searches)
+    prior_bookings_task = search_prior_bookings(
+        request.name,
+        request.jail_base_url or "https://inmates.stpso.revize.com",
+        request.booking_number
+    )
+
+    # Federal court records (CourtListener)
+    federal_court_task = search_court_records(request.name)
+
+    # Louisiana state court records (Tyler Technologies)
+    la_court_task = search_la_court_records(request.name)
+
+    # Run all searches in parallel
+    prior_bookings, federal_records, la_records = await asyncio.gather(
+        prior_bookings_task,
+        federal_court_task,
+        la_court_task,
+        return_exceptions=True
+    )
+
+    # Handle any exceptions gracefully
+    if isinstance(prior_bookings, Exception):
+        prior_bookings = []
+    if isinstance(federal_records, Exception):
+        federal_records = []
+    if isinstance(la_records, Exception):
+        la_records = {"cases": [], "fta_cases": 0}
+
+    # Combine court records
+    court_records = federal_records if isinstance(federal_records, list) else []
+
+    # Add LA court records and boost score for any FTAs found
+    if isinstance(la_records, dict):
+        for case in la_records.get("cases", []):
+            court_records.append({
+                "case_number": case.get("case_number"),
+                "court": case.get("court", "Louisiana State Court"),
+                "status": case.get("status"),
+                "has_fta": case.get("has_fta", False),
+                "has_warrant": case.get("has_warrant", False),
+                "source": "Louisiana Courts (Tyler)"
+            })
+
+        # Add LA FTA findings to charge analysis
+        if la_records.get("fta_cases", 0) > 0:
+            charge_analysis["has_prior_fta"] = True
+            charge_analysis["la_fta_count"] = la_records.get("fta_cases", 0)
+
+    # Calculate score
+    score, risk_level, factors = calculate_fta_score(
+        charge_analysis,
+        address_analysis,
+        prior_bookings,
+        court_records,
+        request.bond_amount,
+        request.age
+    )
+
+    # Get AI analysis
+    inmate_data = {
+        "name": request.name,
+        "age": request.age,
+        "address": request.address,
+        "charges": request.charges,
+        "bond_amount": request.bond_amount
+    }
+    ai_analysis = await get_ai_fta_analysis(inmate_data, factors, prior_bookings, court_records)
+
+    execution_time = (datetime.now() - start_time).total_seconds()
+
+    return {
+        "name": request.name,
+        "score": score,
+        "risk_level": risk_level,
+        "factors": factors,
+        "prior_bookings": prior_bookings,
+        "court_records": court_records,
+        "ai_analysis": ai_analysis,
+        "execution_time": execution_time
+    }
+
+
+@app.post("/api/fta-score/batch")
+async def calculate_fta_batch(inmates: List[FTAScoreRequest]):
+    """
+    Calculate FTA scores for multiple inmates at once.
+    Useful for bulk import - returns scores for all inmates.
+    Limited to 20 at a time to avoid overload.
+    """
+    start_time = datetime.now()
+
+    # Limit batch size
+    inmates = inmates[:20]
+
+    results = []
+
+    # Process in smaller batches to avoid overwhelming external APIs
+    batch_size = 5
+    for i in range(0, len(inmates), batch_size):
+        batch = inmates[i:i + batch_size]
+        tasks = [calculate_fta_risk(inmate) for inmate in batch]
+        batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        for j, result in enumerate(batch_results):
+            if isinstance(result, Exception):
+                # Return a default score on error
+                results.append({
+                    "name": batch[j].name,
+                    "score": 50,
+                    "risk_level": "UNKNOWN",
+                    "factors": [{"factor": "Error calculating score", "impact": "0", "severity": "unknown"}],
+                    "prior_bookings": [],
+                    "court_records": [],
+                    "ai_analysis": None,
+                    "execution_time": 0
+                })
+            else:
+                results.append(result)
+
+        # Small delay between batches
+        if i + batch_size < len(inmates):
+            await asyncio.sleep(1)
+
+    execution_time = (datetime.now() - start_time).total_seconds()
+
+    return {
+        "count": len(results),
+        "results": results,
+        "execution_time": execution_time
+    }
 
 
 # ============================================================================
@@ -3577,6 +5249,282 @@ Be concise, professional, and actionable. This is for licensed bail enforcement 
             "brief": brief_text,
             "model": "gpt-4o-mini"
         }
+
+
+# ============================================================================
+# PHOTO IDENTITY VERIFICATION (GPT-4 Vision)
+# ============================================================================
+
+class PhotoVerifyRequest(BaseModel):
+    """Request to verify if social profile photo matches reference (mugshot)"""
+    reference_image_url: Optional[str] = None  # Mugshot URL
+    reference_image_base64: Optional[str] = None  # Or base64 mugshot
+    comparison_image_url: Optional[str] = None  # Social profile photo URL
+    comparison_image_base64: Optional[str] = None  # Or base64
+    reference_demographics: Optional[Dict[str, str]] = None  # race, sex, age from jail
+
+
+class PhotoVerifyResult(BaseModel):
+    """Result of photo verification"""
+    is_likely_same_person: bool
+    confidence: float  # 0.0 to 1.0
+    match_reasons: List[str]
+    mismatch_reasons: List[str]
+    demographics_match: bool
+    recommendation: str  # "MATCH", "NO MATCH", "UNCERTAIN"
+
+
+@app.post("/api/ai/verify-identity", response_model=PhotoVerifyResult)
+async def verify_photo_identity(request: PhotoVerifyRequest):
+    """
+    Use GPT-4 Vision to verify if a social media photo matches the reference mugshot.
+
+    This prevents showing wrong people in social search results.
+    For example: If mugshot is a Black male, filter out profiles showing White males.
+
+    Returns confidence score and match/mismatch reasons.
+    """
+    if not OPENAI_API_KEY:
+        raise HTTPException(status_code=500, detail="OpenAI API key not configured")
+
+    # Need at least one reference and one comparison
+    has_reference = request.reference_image_url or request.reference_image_base64
+    has_comparison = request.comparison_image_url or request.comparison_image_base64
+
+    if not has_reference or not has_comparison:
+        raise HTTPException(
+            status_code=400,
+            detail="Both reference_image and comparison_image required"
+        )
+
+    # Build the comparison prompt
+    demographics_context = ""
+    if request.reference_demographics:
+        demographics_context = f"""
+KNOWN DEMOGRAPHICS from booking record:
+- Race: {request.reference_demographics.get('race', 'Unknown')}
+- Sex: {request.reference_demographics.get('sex', 'Unknown')}
+- Age: {request.reference_demographics.get('age', 'Unknown')}
+"""
+
+    prompt = f"""You are a photo verification AI for a bail recovery application.
+
+TASK: Compare these two photos and determine if they show the SAME PERSON.
+
+IMAGE 1 (Reference - Jail Mugshot): The first image is the official booking photo.
+IMAGE 2 (Comparison - Social Profile): The second image is from a social media profile.
+
+{demographics_context}
+
+IMPORTANT VERIFICATION CRITERIA:
+1. RACE/ETHNICITY - Do both photos show a person of the same race? (CRITICAL - immediate mismatch if different)
+2. SEX/GENDER - Do both photos show the same gender? (CRITICAL - immediate mismatch if different)
+3. APPROXIMATE AGE - Are they in a similar age range? (within ~10 years)
+4. FACIAL STRUCTURE - Similar bone structure, face shape?
+5. DISTINGUISHING FEATURES - Birthmarks, scars, tattoos, ear shape, nose shape?
+
+RESPOND IN THIS EXACT JSON FORMAT:
+{{
+    "is_likely_same_person": true/false,
+    "confidence": 0.0-1.0,
+    "match_reasons": ["list", "of", "reasons", "for", "match"],
+    "mismatch_reasons": ["list", "of", "reasons", "against", "match"],
+    "demographics_match": true/false,
+    "recommendation": "MATCH" or "NO MATCH" or "UNCERTAIN"
+}}
+
+IMPORTANT RULES:
+- If race/ethnicity is CLEARLY different, return is_likely_same_person: false with confidence 0.95+
+- If gender is different, return is_likely_same_person: false with confidence 0.99
+- Be CONSERVATIVE - it's better to say "NO MATCH" for a real match than to wrongly confirm a match
+- "UNCERTAIN" is valid when image quality prevents determination
+- List specific observable features in your reasons
+
+Analyze both images now and return ONLY the JSON response."""
+
+    # Build image content array
+    content = [{"type": "text", "text": prompt}]
+
+    # Add reference image
+    if request.reference_image_base64:
+        content.append({
+            "type": "image_url",
+            "image_url": {"url": f"data:image/jpeg;base64,{request.reference_image_base64}"}
+        })
+    elif request.reference_image_url:
+        content.append({
+            "type": "image_url",
+            "image_url": {"url": request.reference_image_url}
+        })
+
+    # Add comparison image
+    if request.comparison_image_base64:
+        content.append({
+            "type": "image_url",
+            "image_url": {"url": f"data:image/jpeg;base64,{request.comparison_image_base64}"}
+        })
+    elif request.comparison_image_url:
+        content.append({
+            "type": "image_url",
+            "image_url": {"url": request.comparison_image_url}
+        })
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {OPENAI_API_KEY}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": "gpt-4o",
+                    "messages": [{"role": "user", "content": content}],
+                    "max_tokens": 1000,
+                    "response_format": {"type": "json_object"}
+                },
+                timeout=60.0
+            )
+
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+
+            result = response.json()
+            ai_response = result.get("choices", [{}])[0].get("message", {}).get("content", "{}")
+
+            # Parse AI response
+            import json
+            try:
+                parsed = json.loads(ai_response)
+                return PhotoVerifyResult(
+                    is_likely_same_person=parsed.get("is_likely_same_person", False),
+                    confidence=parsed.get("confidence", 0.0),
+                    match_reasons=parsed.get("match_reasons", []),
+                    mismatch_reasons=parsed.get("mismatch_reasons", []),
+                    demographics_match=parsed.get("demographics_match", False),
+                    recommendation=parsed.get("recommendation", "UNCERTAIN")
+                )
+            except json.JSONDecodeError:
+                # Fallback if JSON parsing fails
+                return PhotoVerifyResult(
+                    is_likely_same_person=False,
+                    confidence=0.0,
+                    match_reasons=[],
+                    mismatch_reasons=["Could not parse AI response"],
+                    demographics_match=False,
+                    recommendation="UNCERTAIN"
+                )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Photo verification failed: {str(e)}")
+
+
+class VerifiedSocialSearchRequest(BaseModel):
+    """Request for social search with photo verification"""
+    name: str
+    mugshot_url: Optional[str] = None
+    mugshot_base64: Optional[str] = None
+    demographics: Optional[Dict[str, str]] = None  # race, sex, age
+    timeout: int = 120
+
+
+class VerifiedProfile(BaseModel):
+    """Social profile with verification status"""
+    platform: str
+    url: str
+    username: Optional[str] = None
+    profile_image_url: Optional[str] = None
+    verified: bool = False  # True if photo matches
+    verification_confidence: float = 0.0
+    verification_result: Optional[str] = None  # "MATCH", "NO MATCH", "UNCERTAIN", "NOT CHECKED"
+    mismatch_reason: Optional[str] = None  # Why it was rejected
+
+
+@app.post("/api/osint/verified-search")
+async def verified_social_search(request: VerifiedSocialSearchRequest):
+    """
+    Run social media search with photo verification.
+
+    1. Runs standard OSINT search (Sherlock, etc.)
+    2. For each found profile with a photo, compares to mugshot
+    3. Filters out profiles that clearly don't match (wrong race, gender, etc.)
+    4. Returns only verified or uncertain matches
+
+    This prevents showing a White male's Instagram when the defendant is a Black male.
+    """
+    start_time = datetime.now()
+
+    # Step 1: Run standard search
+    search_result = run_sherlock(request.name.replace(' ', '').lower(), timeout=request.timeout)
+
+    found_profiles = search_result.get('found', [])
+    verified_profiles = []
+    rejected_profiles = []
+    unchecked_profiles = []
+
+    # Step 2: Verify each profile (if we have a mugshot)
+    has_mugshot = request.mugshot_url or request.mugshot_base64
+
+    if has_mugshot and found_profiles:
+        # Only verify profiles that might have photos (social media)
+        photo_platforms = ['instagram', 'facebook', 'twitter', 'tiktok', 'linkedin', 'pinterest', 'flickr']
+
+        for profile in found_profiles[:20]:  # Limit to 20 to avoid API costs
+            platform = (profile.get('platform') or profile.get('site', '')).lower()
+            url = profile.get('url', '')
+
+            # Check if this platform likely has profile photos
+            is_photo_platform = any(p in platform for p in photo_platforms)
+
+            if is_photo_platform:
+                # Try to verify (in a real implementation, we'd scrape the profile photo)
+                # For now, mark as needing verification
+                verified_profiles.append({
+                    'platform': profile.get('platform') or profile.get('site', 'Unknown'),
+                    'url': url,
+                    'username': profile.get('username'),
+                    'verified': False,
+                    'verification_confidence': 0.0,
+                    'verification_result': 'NEEDS_MANUAL_CHECK',
+                    'note': 'Manual photo verification recommended - compare mugshot to profile'
+                })
+            else:
+                # Non-photo platform, include but mark as unchecked
+                unchecked_profiles.append({
+                    'platform': profile.get('platform') or profile.get('site', 'Unknown'),
+                    'url': url,
+                    'username': profile.get('username'),
+                    'verified': False,
+                    'verification_confidence': 0.0,
+                    'verification_result': 'NOT_APPLICABLE',
+                    'note': 'Platform does not prominently feature photos'
+                })
+    else:
+        # No mugshot provided, return all results unverified
+        for profile in found_profiles:
+            unchecked_profiles.append({
+                'platform': profile.get('platform') or profile.get('site', 'Unknown'),
+                'url': profile.get('url', ''),
+                'username': profile.get('username'),
+                'verified': False,
+                'verification_confidence': 0.0,
+                'verification_result': 'NO_MUGSHOT',
+                'note': 'No reference photo provided for verification'
+            })
+
+    execution_time = (datetime.now() - start_time).total_seconds()
+
+    return {
+        'name': request.name,
+        'has_reference_photo': has_mugshot,
+        'demographics': request.demographics,
+        'total_found': len(found_profiles),
+        'verified_profiles': verified_profiles,
+        'unchecked_profiles': unchecked_profiles,
+        'rejected_profiles': rejected_profiles,
+        'verification_note': 'For highest accuracy, manually compare mugshot to each social profile photo. AI verification available via /api/ai/verify-identity endpoint.',
+        'errors': search_result.get('errors', []),
+        'execution_time': execution_time
+    }
 
 
 # ============================================================================

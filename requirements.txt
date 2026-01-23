@@ -20,51 +20,10 @@ aiofiles>=23.2.1
 # Environment
 python-dotenv>=1.0.0
 
-# Web/Domain Tools
-waybackpy
-dnspython
-python-whois
+# Web Scraping - Anti-bot bypass
+cloudscraper
 
-# Document/Metadata Tools
-ExifRead
-PyPDF2
-python-docx
-
-# Geolocation Tools
-geopy
-
-# Search Tools
-duckduckgo-search
-
-# =============================================
-# OSINT TOOLS - Username/Social
-# =============================================
+# OSINT Tools - lightweight only
 sherlock-project>=0.14.0
-maigret
-socialscan
-
-# =============================================
-# OSINT TOOLS - Email
-# =============================================
 holehe
-h8mail
-theHarvester
-
-# =============================================
-# OSINT TOOLS - Phone
-# =============================================
-# phoneinfoga requires Go binary - use API fallback
-ignorant
-
-# =============================================
-# OSINT TOOLS - Instagram
-# =============================================
-instaloader
-toutatis
-
-# =============================================
-# OSINT TOOLS - Advanced
-# =============================================
-# social-analyzer - heavy dependency, use API
-# blackbird - use maigret as alternative
-# ghunt - requires complex setup, use API fallback
+socialscan
