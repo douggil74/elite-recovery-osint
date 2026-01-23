@@ -4700,9 +4700,9 @@ async def search_prior_bookings(name: str, base_url: str, current_booking: int =
             pass
         return None
 
-    # Check in batches of 10
-    batch_size = 10
-    search_list = list(search_range)[:50]  # Limit to 50 checks
+    # Check in batches of 5 (reduced for speed)
+    batch_size = 5
+    search_list = list(search_range)[:10]  # Limit to 10 checks for speed
 
     for i in range(0, len(search_list), batch_size):
         batch = search_list[i:i + batch_size]
@@ -4713,10 +4713,8 @@ async def search_prior_bookings(name: str, base_url: str, current_booking: int =
             if result and not isinstance(result, Exception):
                 prior_bookings.append(result)
 
-        if len(prior_bookings) >= 5:  # Found enough
+        if len(prior_bookings) >= 2:  # Found enough, stop early
             break
-
-        await asyncio.sleep(0.3)
 
     return prior_bookings
 
@@ -5012,26 +5010,29 @@ async def calculate_fta_risk(request: FTAScoreRequest):
         "st. tammany"  # Default to St. Tammany for now
     )
 
-    # Search for prior bookings (run in parallel with court searches)
+    # Search for prior bookings (run in parallel with court search)
     prior_bookings_task = search_prior_bookings(
         request.name,
         request.jail_base_url or "https://inmates.stpso.revize.com",
         request.booking_number
     )
 
-    # Federal court records (CourtListener)
+    # Federal court records (CourtListener) - fast API call
     federal_court_task = search_court_records(request.name)
 
-    # Louisiana state court records (Tyler Technologies)
-    la_court_task = search_la_court_records(request.name)
+    # NOTE: LA court search disabled - too slow (uses ScrapingBee JS rendering)
+    # User can manually search via the "Search LA Courts" link
+    # la_court_task = search_la_court_records(request.name)
 
-    # Run all searches in parallel
-    prior_bookings, federal_records, la_records = await asyncio.gather(
+    # Run searches in parallel (LA courts excluded for speed)
+    prior_bookings, federal_records = await asyncio.gather(
         prior_bookings_task,
         federal_court_task,
-        la_court_task,
         return_exceptions=True
     )
+
+    # LA records disabled for performance
+    la_records = {"cases": [], "fta_cases": 0}
 
     # Handle any exceptions gracefully
     if isinstance(prior_bookings, Exception):
