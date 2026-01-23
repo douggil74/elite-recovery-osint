@@ -5140,6 +5140,85 @@ async def calculate_fta_batch(inmates: List[FTAScoreRequest]):
 
 
 # ============================================================================
+# DEBUG: Tyler Court Search
+# ============================================================================
+
+@app.get("/api/debug-tyler")
+async def debug_tyler_search(name: str = "Sara Richard"):
+    """Debug endpoint to see what Tyler's site returns"""
+    import os
+    scrapingbee_key = os.environ.get('SCRAPINGBEE_API_KEY')
+
+    if not scrapingbee_key:
+        return {"error": "SCRAPINGBEE_API_KEY not configured"}
+
+    # Parse name
+    parts = name.strip().split()
+    first_name = parts[0] if parts else ""
+    last_name = parts[-1] if len(parts) > 1 else parts[0]
+
+    try:
+        # Simple approach: just load the search page with URL params
+        search_url = f"https://researchla.tylerhost.net/CourtRecordsSearch/#background-tab-Court%20Case%20Search"
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(
+                "https://app.scrapingbee.com/api/v1/",
+                params={
+                    'api_key': scrapingbee_key,
+                    'url': search_url,
+                    'render_js': 'true',
+                    'wait': 5000,
+                    'premium_proxy': 'true',
+                },
+                timeout=30.0
+            )
+
+            if response.status_code == 200:
+                html = response.text
+                from bs4 import BeautifulSoup
+                soup = BeautifulSoup(html, 'html.parser')
+
+                # Get page title
+                title = soup.find('title')
+                title_text = title.get_text(strip=True) if title else "No title"
+
+                # Get all input fields
+                inputs = soup.find_all('input')
+                input_info = [{"name": i.get('name'), "id": i.get('id'), "type": i.get('type')} for i in inputs[:20]]
+
+                # Get all buttons
+                buttons = soup.find_all(['button', 'input[type="submit"]'])
+                button_info = [{"text": b.get_text(strip=True)[:50], "type": b.get('type')} for b in buttons[:10]]
+
+                # Get all links
+                links = soup.find_all('a')
+                link_info = [{"text": a.get_text(strip=True)[:30], "href": a.get('href', '')[:50]} for a in links[:15]]
+
+                # Get body text sample
+                body_text = soup.get_text()[:2000]
+
+                return {
+                    "status": "success",
+                    "page_title": title_text,
+                    "html_length": len(html),
+                    "inputs_found": input_info,
+                    "buttons_found": button_info,
+                    "links_found": link_info,
+                    "body_sample": body_text,
+                    "searched_name": {"first": first_name, "last": last_name}
+                }
+            else:
+                return {
+                    "status": "error",
+                    "scrapingbee_status": response.status_code,
+                    "response": response.text[:500]
+                }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+# ============================================================================
 # HEALTH CHECK
 # ============================================================================
 
