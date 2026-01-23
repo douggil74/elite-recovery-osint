@@ -4086,7 +4086,7 @@ async def search_la_court_records(name: str, parish: str = None, dob: str = None
                 # ScrapingBee can render JavaScript and handle sessions
                 search_url = f"https://researchla.tylerhost.net/CourtRecordsSearch/#!/search?firstName={quote(first_name)}&lastName={quote(last_name)}"
 
-                async with httpx.AsyncClient(timeout=90.0) as client:
+                async with httpx.AsyncClient(timeout=20.0) as client:
                     scrapingbee_url = f"https://app.scrapingbee.com/api/v1/"
 
                     response = await client.get(
@@ -4095,10 +4095,10 @@ async def search_la_court_records(name: str, parish: str = None, dob: str = None
                             'api_key': scrapingbee_key,
                             'url': search_url,
                             'render_js': 'true',
-                            'wait': 5000,  # Wait 5 seconds for Angular to load
+                            'wait': 3000,  # Wait 3 seconds for Angular to load (faster)
                             'premium_proxy': 'true',
                         },
-                        timeout=90.0
+                        timeout=20.0
                     )
 
                     if response.status_code == 200:
@@ -4163,7 +4163,7 @@ async def search_la_court_records(name: str, parish: str = None, dob: str = None
 
         # Fallback to direct API approach
         if not cases and not errors:
-            async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
                 # Step 1: Get login page to establish session
                 login_url = "https://researchla.tylerhost.net/CourtRecordsSearch/Account/Login"
 
@@ -4549,12 +4549,12 @@ async def search_prior_bookings(name: str, base_url: str, current_booking: int =
 
 
 async def search_court_records(name: str) -> List[Dict[str, Any]]:
-    """Search CourtListener for federal court records"""
+    """Search CourtListener for federal court records (with 8s timeout for speed)"""
     records = []
 
     try:
         # CourtListener API (free, federal records)
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as session:
             # Search for party name
             search_url = "https://www.courtlistener.com/api/rest/v3/search/"
             params = {
@@ -4563,7 +4563,7 @@ async def search_court_records(name: str) -> List[Dict[str, Any]]:
                 "order_by": "dateFiled desc"
             }
 
-            async with session.get(search_url, params=params, timeout=15) as resp:
+            async with session.get(search_url, params=params) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     for result in data.get("results", [])[:5]:
@@ -4615,7 +4615,7 @@ Provide a brief (2-3 sentence) assessment of this person's flight risk for a bai
         if not openai_key:
             return None
 
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=12)) as session:
             async with session.post(
                 "https://api.openai.com/v1/chat/completions",
                 headers={
@@ -4623,15 +4623,14 @@ Provide a brief (2-3 sentence) assessment of this person's flight risk for a bai
                     "Content-Type": "application/json"
                 },
                 json={
-                    "model": "gpt-4o",
+                    "model": "gpt-4o-mini",  # Use faster model for quick analysis
                     "messages": [
                         {"role": "system", "content": "You are an expert bail bond risk assessor. Provide brief, actionable assessments."},
                         {"role": "user", "content": context}
                     ],
-                    "max_tokens": 200,
+                    "max_tokens": 150,
                     "temperature": 0.3
-                },
-                timeout=30
+                }
             ) as resp:
                 if resp.status == 200:
                     data = await resp.json()
