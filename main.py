@@ -38,7 +38,7 @@ except ImportError:
 app = FastAPI(
     title="Elite Recovery OSINT API",
     description="Advanced OSINT intelligence gathering for fugitive recovery",
-    version="3.3.0"
+    version="3.4.0"
 )
 
 # CORS - allow all origins for the recovery app
