@@ -4786,7 +4786,7 @@ Provide a brief (2-3 sentence) assessment of this person's flight risk for a bai
         if not openai_key:
             return None
 
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=12)) as session:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
             async with session.post(
                 "https://api.openai.com/v1/chat/completions",
                 headers={
@@ -5010,28 +5010,11 @@ async def calculate_fta_risk(request: FTAScoreRequest):
         "st. tammany"  # Default to St. Tammany for now
     )
 
-    # Search for prior bookings (run in parallel with court search)
-    prior_bookings_task = search_prior_bookings(
-        request.name,
-        request.jail_base_url or "https://inmates.stpso.revize.com",
-        request.booking_number
-    )
-
-    # Federal court records (CourtListener) - fast API call
-    federal_court_task = search_court_records(request.name)
-
-    # NOTE: LA court search disabled - too slow (uses ScrapingBee JS rendering)
-    # User can manually search via the "Search LA Courts" link
-    # la_court_task = search_la_court_records(request.name)
-
-    # Run searches in parallel (LA courts excluded for speed)
-    prior_bookings, federal_records = await asyncio.gather(
-        prior_bookings_task,
-        federal_court_task,
-        return_exceptions=True
-    )
-
-    # LA records disabled for performance
+    # ALL external searches disabled for SPEED
+    # The FTA score is calculated from charge analysis only
+    # User can manually search court records via links
+    prior_bookings = []
+    federal_records = []
     la_records = {"cases": [], "fta_cases": 0}
 
     # Handle any exceptions gracefully
