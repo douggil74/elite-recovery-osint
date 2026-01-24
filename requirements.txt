@@ -20,6 +20,9 @@ aiofiles>=23.2.1
 # Environment
 python-dotenv>=1.0.0
 
+# AI - Claude (primary) and OpenAI (vision)
+anthropic>=0.40.0
+
 # Web Scraping - Anti-bot bypass
 cloudscraper
 

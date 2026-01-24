@@ -27,6 +27,13 @@ from pydantic import BaseModel, EmailStr
 import aiohttp
 import httpx
 
+# Claude AI (primary for reasoning)
+try:
+    import anthropic
+    ANTHROPIC_AVAILABLE = True
+except ImportError:
+    ANTHROPIC_AVAILABLE = False
+
 # Playwright for browser automation (replaces ScrapingBee)
 try:
     from playwright.async_api import async_playwright
@@ -5538,7 +5545,8 @@ async def health_check():
 
     # API-based services
     tools['courtlistener_api'] = 'configured' if COURTLISTENER_API_KEY else 'available (no key = limited)'
-    tools['openai_api'] = 'configured' if OPENAI_API_KEY else 'not configured'
+    tools['claude_api'] = 'configured (primary)' if ANTHROPIC_API_KEY else 'not configured'
+    tools['openai_api'] = 'configured (vision)' if OPENAI_API_KEY else 'not configured'
 
     return {
         'status': 'healthy',
@@ -5609,10 +5617,16 @@ async def root():
 
 
 # ============================================================================
-# AI PROXY (OpenAI) - Keeps API key server-side
+# AI SERVICES - Claude for reasoning, OpenAI for vision
 # ============================================================================
 
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+# Initialize Claude client
+claude_client = None
+if ANTHROPIC_AVAILABLE and ANTHROPIC_API_KEY:
+    claude_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
 class ChatRequest(BaseModel):
     messages: List[Dict[str, str]]
@@ -5638,9 +5652,48 @@ class BriefRequest(BaseModel):
 
 @app.post("/api/ai/chat")
 async def ai_chat(request: ChatRequest):
-    """OpenAI chat completion proxy - keeps API key server-side"""
+    """AI chat - uses Claude for reasoning, falls back to OpenAI"""
+
+    # Try Claude first (preferred for reasoning)
+    if claude_client:
+        try:
+            # Extract system message and user messages
+            system_msg = ""
+            messages = []
+            for msg in request.messages:
+                if msg.get("role") == "system":
+                    system_msg = msg.get("content", "")
+                else:
+                    messages.append({
+                        "role": msg.get("role", "user"),
+                        "content": msg.get("content", "")
+                    })
+
+            # Call Claude
+            response = claude_client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=request.max_tokens,
+                system=system_msg if system_msg else "You are an expert investigative partner helping licensed bail recovery agents locate individuals who have skipped bail. Be direct, actionable, and professional.",
+                messages=messages
+            )
+
+            # Format response to match OpenAI structure (for frontend compatibility)
+            return {
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "content": response.content[0].text
+                    }
+                }],
+                "model": "claude-sonnet-4-20250514",
+                "provider": "anthropic"
+            }
+        except Exception as e:
+            print(f"Claude error, falling back to OpenAI: {e}")
+
+    # Fallback to OpenAI
     if not OPENAI_API_KEY:
-        raise HTTPException(status_code=500, detail="OpenAI API key not configured on server")
+        raise HTTPException(status_code=500, detail="No AI API keys configured on server")
 
     async with httpx.AsyncClient() as client:
         response = await client.post(
@@ -5660,7 +5713,9 @@ async def ai_chat(request: ChatRequest):
         if response.status_code != 200:
             raise HTTPException(status_code=response.status_code, detail=response.text)
 
-        return response.json()
+        result = response.json()
+        result["provider"] = "openai"
+        return result
 
 
 @app.post("/api/ai/analyze")
@@ -5706,9 +5761,7 @@ async def ai_analyze(request: AnalyzeRequest):
 
 @app.post("/api/ai/brief")
 async def generate_brief(request: BriefRequest):
-    """Generate AI-powered recovery brief"""
-    if not OPENAI_API_KEY:
-        raise HTTPException(status_code=500, detail="OpenAI API key not configured on server")
+    """Generate AI-powered recovery brief using Claude"""
 
     # Build context for the AI
     context = f"""Generate a professional fugitive recovery brief for field agents.
@@ -5730,15 +5783,42 @@ SOCIAL MEDIA PROFILES:
 ADDITIONAL NOTES:
 {request.notes or 'None'}
 
-Please provide:
-1. EXECUTIVE SUMMARY (2-3 sentences)
-2. RECOMMENDED APPROACH (tactical advice for field agents)
-3. LOCATIONS TO CHECK (prioritized list based on available info)
-4. TIMING RECOMMENDATIONS (best times to attempt contact/apprehension)
-5. SAFETY CONSIDERATIONS (risk assessment)
-6. BACKUP PLANS (alternative approaches if primary fails)
+Provide a tactical brief with:
+1. EXECUTIVE SUMMARY - Your best assessment of where this person is and why
+2. PRIMARY APPROACH - Most likely location and recommended timing
+3. SECONDARY OPTIONS - Backup locations ranked by probability
+4. SAFETY NOTES - Any concerns based on available info
+5. NEXT STEPS - Specific actionable items
 
-Be concise, professional, and actionable. This is for licensed bail enforcement agents."""
+Write naturally, not in bullet points. Be direct and confident in your assessments."""
+
+    system_prompt = """You are an elite investigative partner for bail recovery agents. You think like a detective - noticing patterns, making deductions, and providing actionable intelligence.
+
+Write in natural paragraphs, not bullet lists. Be confident and direct. When you make an assessment, explain your reasoning briefly. Focus on what the agent should DO, not just what you found."""
+
+    # Try Claude first
+    if claude_client:
+        try:
+            response = claude_client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=2000,
+                system=system_prompt,
+                messages=[{"role": "user", "content": context}]
+            )
+
+            return {
+                "subject": request.subject_name,
+                "generated_at": datetime.now().isoformat(),
+                "brief": response.content[0].text,
+                "model": "claude-sonnet-4-20250514",
+                "provider": "anthropic"
+            }
+        except Exception as e:
+            print(f"Claude brief error, falling back to OpenAI: {e}")
+
+    # Fallback to OpenAI
+    if not OPENAI_API_KEY:
+        raise HTTPException(status_code=500, detail="No AI API keys configured")
 
     async with httpx.AsyncClient() as client:
         response = await client.post(
@@ -5750,7 +5830,7 @@ Be concise, professional, and actionable. This is for licensed bail enforcement 
             json={
                 "model": "gpt-4o-mini",
                 "messages": [
-                    {"role": "system", "content": "You are an expert fugitive recovery consultant helping licensed bail enforcement agents. Provide tactical, professional advice."},
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": context}
                 ],
                 "max_tokens": 2000
@@ -5768,7 +5848,8 @@ Be concise, professional, and actionable. This is for licensed bail enforcement 
             "subject": request.subject_name,
             "generated_at": datetime.now().isoformat(),
             "brief": brief_text,
-            "model": "gpt-4o-mini"
+            "model": "gpt-4o-mini",
+            "provider": "openai"
         }
 
 
