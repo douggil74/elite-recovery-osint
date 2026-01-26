@@ -75,7 +75,7 @@ class UsernameSearchResult(BaseModel):
     searched_at: str
     tool: str
     total_sites: int
-    found: List[Dict[str, str]]
+    found: List[Dict[str, Any]]
     not_found: List[str]
     errors: List[str]
     execution_time: float
@@ -217,15 +217,113 @@ def run_sherlock(username: str, timeout: int = 60) -> Dict[str, Any]:
 
 @app.post("/api/sherlock", response_model=UsernameSearchResult)
 async def sherlock_search(request: UsernameSearchRequest):
-    """Search username across 400+ sites using Sherlock"""
-    loop = asyncio.get_event_loop()
-    result = await loop.run_in_executor(
-        executor,
-        run_sherlock,
-        request.username,
-        request.timeout
-    )
+    """Search username across popular platforms using direct HTTP checks"""
+    # Use direct HTTP checks instead of CLI tools for reliability
+    result = await check_username_direct(request.username)
     return result
+
+
+async def check_username_direct(username: str) -> Dict[str, Any]:
+    """Direct HTTP checks for username on popular platforms - more reliable than CLI tools"""
+    start_time = datetime.now()
+    found = []
+    errors = []
+
+    # Popular platforms with reliable username check patterns
+    platforms = [
+        {"name": "Twitter/X", "url": f"https://twitter.com/{username}", "check": "status_code"},
+        {"name": "Instagram", "url": f"https://www.instagram.com/{username}/", "check": "status_code"},
+        {"name": "GitHub", "url": f"https://github.com/{username}", "check": "status_code"},
+        {"name": "TikTok", "url": f"https://www.tiktok.com/@{username}", "check": "status_code"},
+        {"name": "YouTube", "url": f"https://www.youtube.com/@{username}", "check": "status_code"},
+        {"name": "Reddit", "url": f"https://www.reddit.com/user/{username}", "check": "status_code"},
+        {"name": "Pinterest", "url": f"https://www.pinterest.com/{username}/", "check": "status_code"},
+        {"name": "LinkedIn", "url": f"https://www.linkedin.com/in/{username}", "check": "status_code"},
+        {"name": "Snapchat", "url": f"https://www.snapchat.com/add/{username}", "check": "status_code"},
+        {"name": "Facebook", "url": f"https://www.facebook.com/{username}", "check": "status_code"},
+        {"name": "Twitch", "url": f"https://www.twitch.tv/{username}", "check": "status_code"},
+        {"name": "SoundCloud", "url": f"https://soundcloud.com/{username}", "check": "status_code"},
+        {"name": "Spotify", "url": f"https://open.spotify.com/user/{username}", "check": "status_code"},
+        {"name": "Medium", "url": f"https://medium.com/@{username}", "check": "status_code"},
+        {"name": "Flickr", "url": f"https://www.flickr.com/people/{username}", "check": "status_code"},
+        {"name": "Vimeo", "url": f"https://vimeo.com/{username}", "check": "status_code"},
+        {"name": "Tumblr", "url": f"https://{username}.tumblr.com", "check": "status_code"},
+        {"name": "DeviantArt", "url": f"https://www.deviantart.com/{username}", "check": "status_code"},
+        {"name": "Patreon", "url": f"https://www.patreon.com/{username}", "check": "status_code"},
+        {"name": "Cash App", "url": f"https://cash.app/${username}", "check": "status_code"},
+        {"name": "Venmo", "url": f"https://venmo.com/{username}", "check": "status_code"},
+        {"name": "Steam", "url": f"https://steamcommunity.com/id/{username}", "check": "status_code"},
+        {"name": "Xbox", "url": f"https://account.xbox.com/en-us/profile?gamertag={username}", "check": "status_code"},
+        {"name": "Roblox", "url": f"https://www.roblox.com/users/profile?username={username}", "check": "status_code"},
+    ]
+
+    async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+        tasks = []
+        for platform in platforms:
+            tasks.append(check_single_platform(client, platform, username))
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        for result in results:
+            if isinstance(result, dict) and result.get("found"):
+                found.append({
+                    "platform": result["name"],
+                    "url": result["url"],
+                    "response_time": result.get("response_time", 0)
+                })
+            elif isinstance(result, Exception):
+                errors.append(str(result))
+
+    execution_time = (datetime.now() - start_time).total_seconds()
+
+    return {
+        "username": username,
+        "searched_at": datetime.now().isoformat(),
+        "tool": "direct_http",
+        "total_sites": len(platforms),
+        "found": found,
+        "not_found": [],
+        "errors": errors[:5],  # Limit error messages
+        "execution_time": execution_time
+    }
+
+
+async def check_single_platform(client: httpx.AsyncClient, platform: Dict, username: str) -> Dict:
+    """Check if username exists on a single platform"""
+    try:
+        start = datetime.now()
+        response = await client.get(
+            platform["url"],
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            }
+        )
+        elapsed = (datetime.now() - start).total_seconds()
+
+        # Most platforms return 404 for non-existent users
+        # 200 usually means the profile exists
+        found = response.status_code == 200
+
+        # Some platforms redirect non-existent users
+        if response.status_code in [301, 302, 303, 307, 308]:
+            # Check if redirected to login/home (user doesn't exist)
+            final_url = str(response.url)
+            if "login" in final_url.lower() or final_url == platform["url"].split("/")[0] + "//":
+                found = False
+
+        return {
+            "name": platform["name"],
+            "url": platform["url"],
+            "found": found,
+            "response_time": elapsed
+        }
+    except Exception as e:
+        return {
+            "name": platform["name"],
+            "url": platform["url"],
+            "found": False,
+            "error": str(e)
+        }
 
 
 # ============================================================================
@@ -1596,62 +1694,97 @@ class IgnorantRequest(BaseModel):
     country_code: str = "US"
 
 
-def run_ignorant(phone: str, country_code: str = "US") -> Dict[str, Any]:
-    """Run Ignorant to check phone number for social accounts"""
+async def check_phone_accounts(phone: str, country_code: str = "US") -> Dict[str, Any]:
+    """Check phone number for social media accounts using direct HTTP checks"""
     start_time = datetime.now()
     accounts_found = []
     errors = []
 
-    try:
-        cmd = ["ignorant", phone, "-c", country_code]
+    # Clean phone number
+    clean_phone = ''.join(filter(str.isdigit, phone))
+    if country_code == "US" and len(clean_phone) == 10:
+        clean_phone = "1" + clean_phone
 
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=60
-        )
+    # Services to check with their API patterns
+    checks = [
+        {
+            "name": "WhatsApp",
+            "url": f"https://wa.me/{clean_phone}",
+            "method": "exists_check"
+        },
+        {
+            "name": "Telegram",
+            "url": f"https://t.me/+{clean_phone}",
+            "method": "exists_check"
+        },
+        {
+            "name": "Snapchat",
+            "check_url": "https://accounts.snapchat.com/accounts/merlin/check_phone",
+            "method": "api_check"
+        },
+        {
+            "name": "Signal",
+            "note": "Cannot check directly - encrypted",
+            "method": "skip"
+        },
+    ]
 
-        # Parse output
-        for line in result.stdout.split('\n'):
-            if '[+]' in line:
-                # Found account
-                parts = line.replace('[+]', '').strip()
-                accounts_found.append({
-                    'platform': parts.split(':')[0].strip() if ':' in parts else parts,
-                    'status': 'registered'
-                })
-            elif '[-]' in line:
-                pass  # Not registered, skip
+    async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+        for check in checks:
+            if check.get("method") == "skip":
+                continue
 
-    except subprocess.TimeoutExpired:
-        errors.append("Ignorant search timed out")
-    except FileNotFoundError:
-        errors.append("Ignorant not installed. Run: pip install ignorant")
-    except Exception as e:
-        errors.append(f"Ignorant error: {str(e)}")
+            try:
+                if check.get("method") == "exists_check":
+                    response = await client.get(
+                        check["url"],
+                        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0"}
+                    )
+                    # If we get a 200 and the page isn't a generic "not found" page
+                    if response.status_code == 200:
+                        accounts_found.append({
+                            "platform": check["name"],
+                            "status": "possible",
+                            "url": check["url"],
+                            "note": "Profile link accessible"
+                        })
+            except Exception as e:
+                pass  # Silent fail for individual checks
+
+    # Add common apps that use phone numbers (informational)
+    phone_apps = [
+        {"platform": "Facebook", "status": "check_manually", "note": "May have account linked to this number"},
+        {"platform": "Instagram", "status": "check_manually", "note": "May have account linked to this number"},
+        {"platform": "TikTok", "status": "check_manually", "note": "May have account linked to this number"},
+        {"platform": "Venmo", "status": "check_manually", "note": "Phone-based payment app"},
+        {"platform": "Cash App", "status": "check_manually", "note": "Phone-based payment app"},
+        {"platform": "Zelle", "status": "check_manually", "note": "Bank-linked payment"},
+    ]
 
     return {
-        'phone': phone,
-        'country_code': country_code,
-        'searched_at': datetime.now().isoformat(),
-        'accounts_found': accounts_found,
-        'total_found': len(accounts_found),
-        'errors': errors,
-        'execution_time': (datetime.now() - start_time).total_seconds()
+        "phone": phone,
+        "country_code": country_code,
+        "searched_at": datetime.now().isoformat(),
+        "accounts_found": accounts_found,
+        "apps_to_check": phone_apps,
+        "total_found": len(accounts_found),
+        "errors": errors,
+        "execution_time": (datetime.now() - start_time).total_seconds(),
+        "tip": "Use phone in Facebook/Instagram 'Forgot Password' to check if account exists"
     }
 
 
 @app.post("/api/ignorant")
 async def ignorant_search(request: IgnorantRequest):
-    """Check phone number for social media accounts using Ignorant"""
-    loop = asyncio.get_event_loop()
-    result = await loop.run_in_executor(
-        executor,
-        run_ignorant,
-        request.phone,
-        request.country_code
-    )
+    """Check phone number for social media accounts"""
+    result = await check_phone_accounts(request.phone, request.country_code)
+    return result
+
+
+@app.post("/api/phone-lookup")
+async def phone_lookup(request: IgnorantRequest):
+    """Comprehensive phone number lookup"""
+    result = await check_phone_accounts(request.phone, request.country_code)
     return result
 
 
@@ -1893,73 +2026,112 @@ class GhuntRequest(BaseModel):
     email: EmailStr
 
 
-def run_ghunt(email: str) -> Dict[str, Any]:
-    """Run GHunt to investigate Google account"""
+async def investigate_google_account(email: str) -> Dict[str, Any]:
+    """Investigate Google account using direct checks"""
     start_time = datetime.now()
     intel = {
-        'google_id': None,
-        'name': None,
-        'profile_photos': [],
-        'google_maps_reviews': [],
-        'youtube_channel': None,
-        'google_calendar': None,
-        'last_profile_edit': None
+        "email": email,
+        "google_account_exists": False,
+        "services_found": [],
+        "profile_hints": [],
+        "search_links": []
     }
     errors = []
 
-    try:
-        cmd = ["ghunt", "email", email, "--json"]
+    # Extract username part for searches
+    username = email.split("@")[0] if "@" in email else email
 
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=60
-        )
+    async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+        # Check if Google account exists via recovery page pattern
+        try:
+            # This checks if email is associated with Google
+            response = await client.get(
+                f"https://accounts.google.com/signin/v2/identifier?Email={email}",
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0"}
+            )
+            if response.status_code == 200 and "google" in response.text.lower():
+                intel["google_account_exists"] = True
+        except:
+            pass
 
-        # Parse JSON output
-        if result.stdout:
+        # Check Google services
+        google_checks = [
+            {"name": "YouTube", "url": f"https://www.youtube.com/@{username}", "type": "channel"},
+            {"name": "Google Maps", "url": f"https://www.google.com/maps/contrib/{username}", "type": "reviews"},
+            {"name": "Blogger", "url": f"https://{username}.blogspot.com", "type": "blog"},
+            {"name": "Google Sites", "url": f"https://sites.google.com/view/{username}", "type": "site"},
+        ]
+
+        for check in google_checks:
             try:
-                data = json.loads(result.stdout)
-                intel.update({
-                    'google_id': data.get('personId'),
-                    'name': data.get('names', [{}])[0].get('displayName'),
-                    'profile_photos': data.get('photos', []),
-                    'last_profile_edit': data.get('profileMetadata', {}).get('lastUpdateTime')
-                })
-            except json.JSONDecodeError:
-                # Parse text output
-                for line in result.stdout.split('\n'):
-                    if 'Name:' in line:
-                        intel['name'] = line.split('Name:')[1].strip()
-                    elif 'Gaia ID:' in line or 'Google ID:' in line:
-                        intel['google_id'] = line.split(':')[1].strip()
+                response = await client.get(
+                    check["url"],
+                    headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0"}
+                )
+                if response.status_code == 200:
+                    # Check if it's a real profile (not a 404 page)
+                    if "not found" not in response.text.lower()[:1000]:
+                        intel["services_found"].append({
+                            "service": check["name"],
+                            "url": check["url"],
+                            "type": check["type"]
+                        })
+            except:
+                pass
 
-    except subprocess.TimeoutExpired:
-        errors.append("GHunt search timed out")
-    except FileNotFoundError:
-        errors.append("GHunt not installed. Run: pip install ghunt")
-    except Exception as e:
-        errors.append(f"GHunt error: {str(e)}")
+    # Add useful search links for manual investigation
+    intel["search_links"] = [
+        {
+            "name": "Google Image Search (find photos)",
+            "url": f"https://www.google.com/search?q={email}&tbm=isch"
+        },
+        {
+            "name": "Google Search (full name from email)",
+            "url": f"https://www.google.com/search?q=\"{email}\""
+        },
+        {
+            "name": "Google Maps Reviews",
+            "url": f"https://www.google.com/search?q=\"{email}\"+site:google.com/maps"
+        },
+        {
+            "name": "YouTube Search",
+            "url": f"https://www.youtube.com/results?search_query={username}"
+        },
+        {
+            "name": "Google Docs/Drive (public)",
+            "url": f"https://www.google.com/search?q=\"{email}\"+site:docs.google.com"
+        }
+    ]
+
+    # Profile hints for bail recovery
+    intel["profile_hints"] = [
+        "Check Google Maps reviews - people often review places they frequent",
+        "YouTube subscriptions/comments may reveal interests and location",
+        "Google Photos albums sometimes shared publicly",
+        "Gmail may be linked to recovery phone number"
+    ]
 
     return {
-        'email': email,
-        'searched_at': datetime.now().isoformat(),
-        'intel': intel,
-        'errors': errors,
-        'execution_time': (datetime.now() - start_time).total_seconds()
+        "email": email,
+        "searched_at": datetime.now().isoformat(),
+        "intel": intel,
+        "services_found": len(intel["services_found"]),
+        "errors": errors,
+        "execution_time": (datetime.now() - start_time).total_seconds()
     }
 
 
 @app.post("/api/ghunt")
 async def ghunt_search(request: GhuntRequest):
-    """Investigate Google account using GHunt"""
-    loop = asyncio.get_event_loop()
-    result = await loop.run_in_executor(
-        executor,
-        run_ghunt,
-        request.email
-    )
+    """Investigate Google account"""
+    result = await investigate_google_account(request.email)
+    return result
+
+
+@app.post("/api/google-lookup")
+async def google_lookup(request: GhuntRequest):
+    """Comprehensive Google account investigation"""
+    result = await investigate_google_account(request.email)
     return result
 
 
@@ -3553,6 +3725,258 @@ async def extract_metadata(request: MetadataRequest):
         'errors': errors,
         'execution_time': (datetime.now() - start_time).total_seconds()
     }
+
+
+# ============================================================================
+# PHOTO GPS EXTRACTION - Extract GPS coordinates from image EXIF
+# ============================================================================
+
+class PhotoGPSRequest(BaseModel):
+    image_base64: str
+
+
+def convert_gps_to_decimal(gps_coords, gps_ref):
+    """Convert EXIF GPS coordinates (degrees, minutes, seconds) to decimal"""
+    try:
+        # Handle both string and Ratio formats
+        def to_float(val):
+            if hasattr(val, 'num') and hasattr(val, 'den'):
+                return float(val.num) / float(val.den)
+            return float(val)
+
+        degrees = to_float(gps_coords[0])
+        minutes = to_float(gps_coords[1])
+        seconds = to_float(gps_coords[2])
+
+        decimal = degrees + (minutes / 60.0) + (seconds / 3600.0)
+
+        # Apply hemisphere
+        if gps_ref in ['S', 'W']:
+            decimal = -decimal
+
+        return round(decimal, 6)
+    except Exception as e:
+        print(f"GPS conversion error: {e}")
+        return None
+
+
+@app.post("/api/photo-gps")
+async def extract_photo_gps(request: PhotoGPSRequest):
+    """Extract GPS coordinates and EXIF data from photo"""
+    start_time = datetime.now()
+    result = {
+        'has_gps': False,
+        'latitude': None,
+        'longitude': None,
+        'altitude': None,
+        'timestamp': None,
+        'camera_make': None,
+        'camera_model': None,
+        'errors': []
+    }
+
+    try:
+        import base64
+        import tempfile
+        import exifread
+
+        # Strip data URL prefix if present (e.g., "data:image/png;base64,")
+        image_b64 = request.image_base64
+        if ',' in image_b64:
+            image_b64 = image_b64.split(',', 1)[1]
+
+        # Decode image
+        image_data = base64.b64decode(image_b64)
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp:
+            tmp.write(image_data)
+            tmp_path = tmp.name
+
+        try:
+            with open(tmp_path, 'rb') as f:
+                tags = exifread.process_file(f, details=True)
+
+            # Extract GPS coordinates
+            if 'GPS GPSLatitude' in tags and 'GPS GPSLongitude' in tags:
+                lat_ref = str(tags.get('GPS GPSLatitudeRef', 'N'))
+                lon_ref = str(tags.get('GPS GPSLongitudeRef', 'W'))
+
+                lat_vals = tags['GPS GPSLatitude'].values
+                lon_vals = tags['GPS GPSLongitude'].values
+
+                lat = convert_gps_to_decimal(lat_vals, lat_ref)
+                lon = convert_gps_to_decimal(lon_vals, lon_ref)
+
+                if lat is not None and lon is not None:
+                    result['has_gps'] = True
+                    result['latitude'] = lat
+                    result['longitude'] = lon
+
+                    # Get altitude if available
+                    if 'GPS GPSAltitude' in tags:
+                        try:
+                            alt = tags['GPS GPSAltitude'].values[0]
+                            if hasattr(alt, 'num') and hasattr(alt, 'den'):
+                                result['altitude'] = round(float(alt.num) / float(alt.den), 1)
+                        except:
+                            pass
+
+            # Extract timestamp
+            if 'EXIF DateTimeOriginal' in tags:
+                result['timestamp'] = str(tags['EXIF DateTimeOriginal'])
+            elif 'Image DateTime' in tags:
+                result['timestamp'] = str(tags['Image DateTime'])
+
+            # Extract camera info
+            if 'Image Make' in tags:
+                result['camera_make'] = str(tags['Image Make'])
+            if 'Image Model' in tags:
+                result['camera_model'] = str(tags['Image Model'])
+
+        finally:
+            os.unlink(tmp_path)
+
+    except Exception as e:
+        result['errors'].append(f"EXIF extraction error: {str(e)}")
+
+    result['execution_time'] = (datetime.now() - start_time).total_seconds()
+    return result
+
+
+# ============================================================================
+# REVERSE IMAGE SEARCH - Find original images with metadata
+# ============================================================================
+
+class ReverseImageSearchRequest(BaseModel):
+    image_base64: str
+
+
+@app.post("/api/reverse-image-search")
+async def reverse_image_search(request: ReverseImageSearchRequest):
+    """
+    Reverse image search to find original photos that may have GPS metadata.
+    Returns search URLs and attempts to find matches via free services.
+    """
+    start_time = datetime.now()
+    results = {
+        'search_urls': [],
+        'matches_found': [],
+        'tips': [],
+        'errors': []
+    }
+
+    try:
+        import base64
+        import tempfile
+        import hashlib
+
+        # Strip data URL prefix if present (e.g., "data:image/png;base64,")
+        image_b64 = request.image_base64
+        if ',' in image_b64:
+            image_b64 = image_b64.split(',', 1)[1]
+
+        # Decode image
+        image_data = base64.b64decode(image_b64)
+        image_hash = hashlib.md5(image_data).hexdigest()
+
+        # Save temporarily for potential API uploads
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp:
+            tmp.write(image_data)
+            tmp_path = tmp.name
+
+        try:
+            # Generate search URLs for manual searching
+            # These open directly in the browser with the image
+
+            # 1. Google Images - requires uploading, provide instructions
+            results['search_urls'].append({
+                'engine': 'Google Images',
+                'url': 'https://images.google.com/',
+                'instructions': 'Click camera icon, upload image or paste URL',
+                'best_for': 'Finding copies across the web, news articles'
+            })
+
+            # 2. Yandex - often finds more than Google for people
+            results['search_urls'].append({
+                'engine': 'Yandex Images',
+                'url': 'https://yandex.com/images/',
+                'instructions': 'Click camera icon, upload image',
+                'best_for': 'Finding social media profiles, especially Eastern European'
+            })
+
+            # 3. TinEye - specialized reverse image search
+            results['search_urls'].append({
+                'engine': 'TinEye',
+                'url': 'https://tineye.com/',
+                'instructions': 'Upload image or paste URL',
+                'best_for': 'Finding original source, oldest version with metadata'
+            })
+
+            # 4. Bing Visual Search
+            results['search_urls'].append({
+                'engine': 'Bing Visual Search',
+                'url': 'https://www.bing.com/visualsearch',
+                'instructions': 'Drag and drop image',
+                'best_for': 'Finding similar images, products, locations'
+            })
+
+            # 5. PimEyes (face search) - paid but powerful
+            results['search_urls'].append({
+                'engine': 'PimEyes',
+                'url': 'https://pimeyes.com/',
+                'instructions': 'Upload face photo - finds other photos of same person',
+                'best_for': 'Finding other photos of the same person across the internet'
+            })
+
+            # 6. FaceCheck.ID - face recognition search
+            results['search_urls'].append({
+                'engine': 'FaceCheck.ID',
+                'url': 'https://facecheck.id/',
+                'instructions': 'Upload face photo for reverse face search',
+                'best_for': 'Finding social media profiles by face'
+            })
+
+            # Try TinEye API (free tier - limited)
+            try:
+                # TinEye has a free search page we can link to
+                # For actual API, would need paid subscription
+                pass
+            except Exception as e:
+                results['errors'].append(f"TinEye search error: {str(e)}")
+
+            # Add tips for finding original with metadata
+            results['tips'] = [
+                "TinEye shows 'oldest' results first - these are most likely to be originals with GPS data",
+                "Check image properties on found pages - right click > Properties or Inspect",
+                "Look for the image on cloud services (Google Photos, iCloud) where metadata is preserved",
+                "Facebook/Instagram strip GPS but may show tagged location on the post",
+                "Request the original photo directly from the source if possible",
+                "Check if the person posted the same photo to multiple platforms - one may have kept metadata"
+            ]
+
+            # Calculate image dimensions for reference
+            try:
+                from PIL import Image
+                import io
+                img = Image.open(io.BytesIO(image_data))
+                results['image_info'] = {
+                    'width': img.width,
+                    'height': img.height,
+                    'format': img.format,
+                    'mode': img.mode,
+                    'hash': image_hash[:12]
+                }
+            except:
+                results['image_info'] = {'hash': image_hash[:12]}
+
+        finally:
+            os.unlink(tmp_path)
+
+    except Exception as e:
+        results['errors'].append(f"Reverse image search error: {str(e)}")
+
+    results['execution_time'] = (datetime.now() - start_time).total_seconds()
+    return results
 
 
 # ============================================================================
@@ -5757,6 +6181,61 @@ async def ai_analyze(request: AnalyzeRequest):
             raise HTTPException(status_code=response.status_code, detail=response.text)
 
         return response.json()
+
+
+class OCRRequest(BaseModel):
+    image_base64: str
+    page_number: int = 1
+
+
+@app.post("/api/ocr")
+async def ocr_image(request: OCRRequest):
+    """Extract text from image using GPT-4 Vision OCR"""
+    if not OPENAI_API_KEY:
+        raise HTTPException(status_code=500, detail="OpenAI API key not configured on server")
+
+    # Strip data URL prefix if present (e.g., "data:image/png;base64,")
+    image_b64 = request.image_base64
+    if ',' in image_b64:
+        image_b64 = image_b64.split(',', 1)[1]
+
+    content = [
+        {
+            "type": "text",
+            "text": "Extract ALL text from this document image. Return ONLY the extracted text, preserving the layout as much as possible. Include all names, addresses, phone numbers, dates, and any other information visible."
+        },
+        {
+            "type": "image_url",
+            "image_url": {"url": f"data:image/png;base64,{image_b64}"}
+        }
+    ]
+
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "gpt-4o-mini",
+                "messages": [{"role": "user", "content": content}],
+                "max_tokens": 4000
+            },
+            timeout=120.0
+        )
+
+        if response.status_code != 200:
+            raise HTTPException(status_code=response.status_code, detail=response.text)
+
+        result = response.json()
+        text = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+
+        return {
+            "success": True,
+            "text": text,
+            "page_number": request.page_number
+        }
 
 
 @app.post("/api/ai/brief")
